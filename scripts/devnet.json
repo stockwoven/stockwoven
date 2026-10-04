@@ -1,0 +1,19 @@
+{
+  "cluster": "devnet",
+  "program": "H9ZJiWoKXGrje8Y3errCSh2uXUiNpf8mDmjJ7TapZm7b",
+  "mintA": "A4MreQpJnaqkuiKqyPM9C1znHY1h7anRbEjj9WhbDRjB",
+  "mintB": "DEN6wzRx9uYg6rhEABWPsBbmh2t8i6zzJrvS9KiCHrzW",
+  "decimalsA": 8,
+  "decimalsB": 6,
+  "pool": "8YWKborDT1HTv1RGQ6RnPypupDtkcfkUHhbpqDF4Zg3x",
+  "vault": "EAVx4zUPniYFzfq6wXomYqABWgAQ1fyfF9HcwcNg68ju",
+  "shareMint": "9crixeL4zhTGV5ggDVKuuWTiTSMJBTD1tyAJngi6a2xZ",
+  "position": "7wAtm3mk5jM6ZfPfKfLkGMnMJ4dboyxyzaJyARyHv4vK",
+  "positionNftAccount": "Aq6YyhNcnSihrsb7ATAgbywhddyLQ5RSRZ8d7oGSVmpZ",
+  "tokenAVault": "D4aivGddwMGNak6dCmA1C6ujK31sufd9bSGyhy7ktk4k",
+  "tokenBVault": "HqXQLg7YYK4GoiLHHEM69TeqzqFY3suNaqPVwpw6wzxB",
+  "reserveA": "6LMPkTum1qwWYtVHVz5GWT8JnUwYHGuQPgb7CL5M2NBG",
+  "reserveB": "FWVVbQBEC5ddf7yWoVe8YM97wfJj6T6pgVCtoDMRPRQj",
+  "treasury": "3Kbce1j9DpDzM4fGS3qSJZeqX8ixjUPXVxfcJpRSdJ4n",
+  "liquidityPerShare": "922337203685477580"
+}
