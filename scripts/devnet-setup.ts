@@ -3,7 +3,7 @@
 //
 //   KEYPAIR=~/.config/solana/id.json npm run devnet:setup
 //
-// Writes the addresses to scripts/devnet.json for the app.
+// Writes the addresses to scripts/devnet.json and app/src/lib/devnet.json.
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -159,8 +159,10 @@ async function main() {
     reserveA: reserveA.toBase58(), reserveB: reserveB.toBase58(), treasury: treasury.toBase58(),
     liquidityPerShare: LIQUIDITY_PER_SHARE.toString(),
   };
-  writeFileSync(new URL("./devnet.json", import.meta.url), JSON.stringify(out, null, 2) + "\n");
-  console.log("wrote scripts/devnet.json");
+  for (const file of ["./devnet.json", "../app/src/lib/devnet.json"]) {
+    writeFileSync(new URL(file, import.meta.url), JSON.stringify(out, null, 2) + "\n");
+  }
+  console.log("wrote scripts/devnet.json and app/src/lib/devnet.json");
 }
 
 main().catch((e) => {
