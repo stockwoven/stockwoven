@@ -1,0 +1,26 @@
+# Servidor Next.js do Stockwoven. Instale em /etc/systemd/system/stockwoven.service
+# (veja deploy/README.md) e use: systemctl status|restart|stop stockwoven
+
+[Unit]
+Description=Stockwoven (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stockwoven
+Group=stockwoven
+WorkingDirectory=/var/www/stockwoven/current
+EnvironmentFile=/etc/stockwoven/stockwoven.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+
+# O processo só lê o release e a chave do faucet; não precisa de mais nada do sistema.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // A self-contained server (.next/standalone/server.js) for deploying behind nginx; see deploy/README.md.
+  output: "standalone",
   pageExtensions: ["ts", "tsx", "md", "mdx"],
   // The repo root has its own package-lock.json (for scripts/); this app is its own root.
   turbopack: { root: path.resolve(".") },
