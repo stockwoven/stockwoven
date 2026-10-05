@@ -309,6 +309,7 @@ const PAGES = [
   ["app-vaults-disconnected", "app", {}],
   ["app-portfolio", "app/portfolio", { connected: true }],
   ["app-convert", "app/convert", { connected: true }],
+  ["app-markets", "app/markets", {}],
   ["app-devnet", "app/devnet", { connected: true }],
   ["docs-overview", "docs/overview", {}],
   ["docs-fees", "docs/fees", {}],

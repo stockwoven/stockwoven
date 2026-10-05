@@ -1,0 +1,32 @@
+# Markets.
+
+The same stock trades as several tokens on Solana, one per issuer. The Markets tab shows how each of them traded over the last month, every 15 minutes, against the real stock.
+
+## What the tape is
+
+One row per 15-minute interval in which a token traded on its main pool:
+
+- **Price per share:** the token's price, divided by its scaled UI amount multiplier, so it is the price of one real share.
+- **Fair value:** the stock's last price during US market hours, and its perpetual future (Hyperliquid) outside them.
+- **Premium:** how far the price per share sat above (+) or below (−) the fair value, in basis points. 100 bps is 1%.
+- **Volume:** USD traded in the interval.
+
+Intervals without trades don't appear. Times are in your local time zone. The shaded bands on the charts are regular US market hours.
+
+## Reading the numbers
+
+- **Usual token premium:** the median premium of the token most people would buy without comparing, such as the xStocks one.
+- **Spread (IQR):** the distance between the 25th and 75th percentile of the premium. A wider spread means the token drifts more around fair value.
+- **Issuer savings:** in each interval where two comparable tokens both traded, how much less the cheapest one cost per share than the usual one. The placebo is the same comparison between two pools of a single token. The figure shown is the savings minus the placebo, so it counts only what choosing the issuer adds over noise.
+- **Cheapest:** the token that cost least per share in that interval.
+
+## Why it matters for Stockwoven
+
+When issuers' tokens drift apart, a pool that holds both of them earns fees from the conversions that bring them back together. That is the yield behind each Stockwoven vault token. See [Fees](/docs/fees).
+
+## Limits
+
+- Prices are pool prices, without the impact of an order's size. Shallow pools can show savings that a large order would not get.
+- Some pre-IPO tokens are not one share of the company. Their premium is left out, and their trades stay in the tape.
+- Pre-IPO companies have no listed stock or perp, so their charts show the token price instead of a premium.
+- The data is a snapshot from the research collector, refreshed when the team reruns it, not live.

@@ -6,6 +6,7 @@ export const DOCS = [
   { slug: "redeem", title: "Redeem" },
   { slug: "fees", title: "Fees" },
   { slug: "supported-assets", title: "Supported issuers & assets" },
+  { slug: "markets", title: "Markets" },
   { slug: "risks", title: "Risks & protections" },
   { slug: "for-partners", title: "For partners" },
   { slug: "faq", title: "FAQ" },

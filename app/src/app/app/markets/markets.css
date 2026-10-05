@@ -1,0 +1,362 @@
+/* Markets: the stock-token tape. Issuer colors are the validated categorical slots
+   (blue, orange, aqua, yellow, magenta), fixed per issuer so a token keeps its color everywhere.
+   Purple stays the interface accent; it never marks data. */
+
+.app-main {
+  --issuer-xstocks: #2a78d6;
+  --issuer-backpack: #eb6834;
+  --issuer-tessera: #1baf7a;
+  --issuer-prestocks: #eda100;
+  --issuer-ondo: #e87ba4;
+  --div-neg: #2a78d6;
+  --div-pos: #e34948;
+  --grid: color-mix(in srgb, var(--line) 55%, var(--surface));
+  --band: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.markets-lede {
+  max-width: 72ch;
+  margin-top: calc(-1 * var(--space-2));
+}
+
+.verdicts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+@media (min-width: 900px) {
+  .verdicts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.verdict {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.verdict p {
+  margin: 0;
+}
+
+.verdict__state {
+  flex: none;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.verdict__state.is-yes {
+  color: var(--text);
+  background: var(--bg);
+}
+
+.verdict__state.is-no {
+  color: var(--text-subtle);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-6);
+  align-items: center;
+  padding-block: var(--space-2);
+}
+
+.filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+}
+
+.seg button {
+  min-height: 36px;
+  padding-inline: var(--space-3);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-body);
+  cursor: pointer;
+}
+
+.seg button:hover {
+  color: var(--text);
+}
+
+.seg button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-purple);
+}
+
+.figures--3,
+.figures--4 {
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-4);
+}
+
+@media (min-width: 900px) {
+  .figures--3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .figures--4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.figure__note {
+  white-space: normal;
+}
+
+.markets-table .row--active td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-left: var(--space-3);
+}
+
+.stock-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+.stock-link:hover,
+.stock-link[aria-pressed="true"] {
+  text-decoration-color: var(--accent);
+}
+
+.toks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.tok {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.tok__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tok-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.cheapest {
+  color: var(--accent-text);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+.premium {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.premium__bar {
+  position: relative;
+  width: 52px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--grid);
+  flex: none;
+}
+
+.premium__bar i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+}
+
+.premium__bar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--text-subtle);
+}
+
+.chart-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chart {
+  position: relative;
+  min-width: 0;
+}
+
+.chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.chart text {
+  fill: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.chart-empty {
+  padding-block: var(--space-8);
+}
+
+.chart-tip {
+  position: absolute;
+  z-index: 3;
+  min-width: 180px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--text) 12%, transparent);
+  pointer-events: none;
+}
+
+.chart-tip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 13px;
+}
+
+.chart-tip__row span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-subtle);
+}
+
+.chart-tip__row i {
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.chart-tip__row b {
+  font-weight: 400;
+  color: var(--text);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  font-size: 13px;
+}
+
+.legend__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.legend__line {
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+}
+
+.legend__band {
+  width: 16px;
+  height: 10px;
+  background: var(--band);
+  border: 1px solid var(--line);
+}
+
+/* These tables are dense data, so on small screens they keep their rows and scroll sideways
+   instead of turning into the app's label/value cards. */
+.table-scroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .table.markets-table {
+    display: table;
+    min-width: 680px;
+  }
+
+  .table.markets-table thead {
+    display: table-header-group;
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .table.markets-table tbody {
+    display: table-row-group;
+  }
+
+  .table.markets-table tr {
+    display: table-row;
+    padding: 0;
+  }
+
+  .table.markets-table td,
+  .table.markets-table tr:last-child td {
+    display: table-cell;
+    padding: var(--space-3) var(--space-4) var(--space-3) 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .table.markets-table .td-label {
+    display: none;
+  }
+
+  .table.markets-table td {
+    white-space: nowrap;
+  }
+
+  .table.markets-table .num {
+    text-align: right;
+  }
+}
