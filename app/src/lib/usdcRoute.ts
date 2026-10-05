@@ -1,9 +1,16 @@
-// Routed single-token deposit: sell part of one issuer's token for USDC, buy the other issuer's
-// token with it in a second stock/USDC pool, then make a proportional deposit. The vault's pool
-// grows in both tokens, and the vault program only sees a normal `deposit`. Built client-side.
+// Deposits routed through USDC pools, built client-side; the vault program only sees a normal
+// `deposit`, and the vault's pool grows in both tokens:
+// - one issuer's token: sell part of it for USDC and buy the other issuer's token with it;
+// - USDC: buy both issuers' tokens;
+// - SOL: swap it for USDC first.
 
-import { PublicKey, TransactionInstruction } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
+import { PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
+import {
+  NATIVE_MINT,
+  createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
+  createSyncNativeInstruction,
+} from "@solana/spl-token";
 import devnet from "./devnet.json";
 import { DammPool, PoolState, VAULT, ata, depositIx, poolSwapIx, quoteSwap, sharesFor } from "./stockwoven";
 
@@ -94,5 +101,99 @@ export function routedDepositIxs(user: PublicKey, q: RoutedQuote): TransactionIn
     poolSwapIx(sell, user, ata(user, sell.mintA), usdc, q.sold, q.usdcIn),
     poolSwapIx(buy, user, usdc, ata(user, buy.mintA), q.usdcIn, q.minBought),
     depositIx(user, q.shares, q.maxA, q.maxB),
+  ];
+}
+
+/** The wSOL/USDC pool (wSOL is token A), for deposits that start from SOL. */
+export const SOL_ROUTE =
+  USDC_ROUTE && devnet.solRoute
+    ? {
+        pool: new PublicKey(devnet.solRoute.pool),
+        tokenAVault: new PublicKey(devnet.solRoute.solVault),
+        tokenBVault: new PublicKey(devnet.solRoute.usdcVault),
+        mintA: NATIVE_MINT,
+        mintB: USDC_ROUTE.usdc,
+      }
+    : null;
+
+export type UsdcQuote = {
+  /** USDC spent on each issuer's token, and the least of each the deposit relies on. */
+  usdcA: bigint;
+  usdcB: bigint;
+  minA: bigint;
+  minB: bigint;
+  shares: bigint;
+};
+
+/**
+ * Splits `usdcIn` between the two issuers' tokens so what is bought sits at the vault pool's
+ * ratio: more USDC on A raises the A side's coverage and lowers B's, so it bisects for the cross.
+ */
+export function quoteUsdcDeposit(pool: PoolState, supply: bigint, usdcIn: bigint): UsdcQuote | null {
+  if (!USDC_ROUTE || !pool.routes || usdcIn <= 0n) return null;
+  const { a: poolA, b: poolB } = pool.routes;
+  const legs = (usdcA: bigint) => ({
+    usdcA,
+    usdcB: usdcIn - usdcA,
+    minA: buffered(quoteSwap(poolA, false, usdcA)),
+    minB: buffered(quoteSwap(poolB, false, usdcIn - usdcA)),
+  });
+  let [lo, hi] = [0n, usdcIn];
+  while (hi - lo > 1n) {
+    const mid = (lo + hi) / 2n;
+    const { minA, minB } = legs(mid);
+    // Compare the liquidity each side covers: a / reserveA against b / reserveB.
+    if (minA * pool.reserveB < minB * pool.reserveA) lo = mid;
+    else hi = mid;
+  }
+  const best = [legs(lo), legs(hi)]
+    .map((l) => ({ ...l, shares: sharesFor(pool, supply, l.minA, l.minB) }))
+    .reduce((x, y) => (y.shares > x.shares ? y : x));
+  return best.shares > 0n && best.usdcA > 0n && best.usdcB > 0n ? best : null;
+}
+
+/** SOL becomes USDC in the wSOL/USDC pool first; the rest is a USDC deposit. */
+export function quoteSolDeposit(pool: PoolState, supply: bigint, lamports: bigint) {
+  if (!SOL_ROUTE || !pool.routes?.sol || lamports <= 0n) return null;
+  const usdcIn = buffered(quoteSwap(pool.routes.sol, true, lamports));
+  const usdc = quoteUsdcDeposit(pool, supply, usdcIn);
+  return usdc && { lamports, usdcIn, usdc };
+}
+
+/** Buy both issuers' tokens with USDC from the wallet's USDC account, then deposit them. */
+function buyBothAndDepositIxs(user: PublicKey, q: UsdcQuote): TransactionInstruction[] {
+  if (!USDC_ROUTE) return [];
+  const usdc = ata(user, USDC_ROUTE.usdc);
+  return [
+    poolSwapIx(USDC_ROUTE.a, user, usdc, ata(user, VAULT.mintA), q.usdcA, q.minA),
+    poolSwapIx(USDC_ROUTE.b, user, usdc, ata(user, VAULT.mintB), q.usdcB, q.minB),
+    depositIx(user, q.shares, q.minA, q.minB),
+  ];
+}
+
+/** A USDC deposit. Anything the deposit doesn't take stays in the wallet. */
+export function usdcDepositIxs(user: PublicKey, q: UsdcQuote): TransactionInstruction[] {
+  if (!USDC_ROUTE) return [];
+  return [usdcAccountIx(user), ...buyBothAndDepositIxs(user, q)];
+}
+
+const usdcAccountIx = (user: PublicKey) =>
+  createAssociatedTokenAccountIdempotentInstruction(user, ata(user, USDC_ROUTE!.usdc), user, USDC_ROUTE!.usdc);
+
+/**
+ * Wrap SOL, swap it for USDC, then a USDC deposit. Closing the wSOL account at the end returns
+ * its rent (and any wSOL the wallet already held there) as SOL.
+ */
+export function solDepositIxs(user: PublicKey, q: NonNullable<ReturnType<typeof quoteSolDeposit>>): TransactionInstruction[] {
+  if (!SOL_ROUTE || !USDC_ROUTE) return [];
+  const wsol = ata(user, NATIVE_MINT);
+  return [
+    createAssociatedTokenAccountIdempotentInstruction(user, wsol, user, NATIVE_MINT),
+    SystemProgram.transfer({ fromPubkey: user, toPubkey: wsol, lamports: q.lamports }),
+    createSyncNativeInstruction(wsol),
+    usdcAccountIx(user),
+    poolSwapIx(SOL_ROUTE, user, wsol, ata(user, USDC_ROUTE.usdc), q.lamports, q.usdcIn),
+    ...buyBothAndDepositIxs(user, q.usdc),
+    createCloseAccountInstruction(wsol, user, user),
   ];
 }

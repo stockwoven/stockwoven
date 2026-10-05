@@ -30,5 +30,10 @@
       "usdcVault": "84bcHohhWNcGxCgJ3jtAc1734ZBAZbBvTuKgXmGefiZU"
     }
   },
-  "lookupTable": "5wvk9BrKeYEV13ExtaLM24Nbacvm67TW3jL1Kp9QBarf"
+  "lookupTable": "5wvk9BrKeYEV13ExtaLM24Nbacvm67TW3jL1Kp9QBarf",
+  "solRoute": {
+    "pool": "3n6nM4mN722rB8oa5RH2c3y75eaGemhveBBK1xu45qYL",
+    "solVault": "Bn83pTazSyX3agoq2Qidb3nBnGPC9LBwW4sT6aAPNKDr",
+    "usdcVault": "FkVY8M4BCmGX2huiYqd31QGeQwJWcg7gAALhwhXWBVY7"
+  }
 }

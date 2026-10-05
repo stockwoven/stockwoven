@@ -52,7 +52,8 @@ export function HoldPanel() {
             {[
               ["mINTCx", "xStocks, mock", user && `${fromRaw(user.a, VAULT.decimalsA)} mINTCx`],
               ["mINTC", "Backpack, mock", user && `${fromRaw(user.b, VAULT.decimalsB)} mINTC`],
-              ["SOL", "for fees", user && `${user.sol.toFixed(3)} SOL`],
+              ["USDC", "test token", user && `${fromRaw(user.usdc, 6, 2)} USDC`],
+              ["SOL", "fees and deposits", user && `${user.sol.toFixed(3)} SOL`],
             ].map(([name, note, value]) => (
               <div key={name}>
                 <dt className="t-body">

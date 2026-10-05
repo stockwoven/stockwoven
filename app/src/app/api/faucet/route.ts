@@ -22,6 +22,8 @@ import devnet from "@/lib/devnet.json";
 
 const RPC = process.env.RPC_URL ?? "https://api.devnet.solana.com";
 const TOKENS_PER_DRIP = 10n;
+/** Test USDC, for deposits that start from USDC (the admin also holds its mint authority). */
+const USDC_PER_DRIP = 100n;
 const SOL_TOP_UP = 0.02 * LAMPORTS_PER_SOL;
 const recent = new Map<string, number>();
 
@@ -48,12 +50,17 @@ export async function POST(req: Request) {
     const admin = adminKeypair();
     const conn = new Connection(RPC, "confirmed");
     const tx = new Transaction();
-    for (const [mint, decimals] of [[devnet.mintA, devnet.decimalsA], [devnet.mintB, devnet.decimalsB]] as const) {
+    const drips: [string, number, bigint][] = [
+      [devnet.mintA, devnet.decimalsA, TOKENS_PER_DRIP],
+      [devnet.mintB, devnet.decimalsB, TOKENS_PER_DRIP],
+      ...(devnet.usdcMint ? [[devnet.usdcMint, devnet.usdcDecimals, USDC_PER_DRIP] as [string, number, bigint]] : []),
+    ];
+    for (const [mint, decimals, units] of drips) {
       const mintKey = new PublicKey(mint);
       const account = getAssociatedTokenAddressSync(mintKey, owner);
       tx.add(
         createAssociatedTokenAccountIdempotentInstruction(admin.publicKey, account, owner, mintKey),
-        createMintToInstruction(mintKey, account, admin.publicKey, TOKENS_PER_DRIP * 10n ** BigInt(decimals)),
+        createMintToInstruction(mintKey, account, admin.publicKey, units * 10n ** BigInt(decimals)),
       );
     }
     if ((await conn.getBalance(owner)) < SOL_TOP_UP / 2) {

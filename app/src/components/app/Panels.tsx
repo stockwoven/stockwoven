@@ -101,7 +101,7 @@ export function FaucetPanel() {
     <section className="tile">
       <h2 className="t-heading-sm">Get test tokens.</h2>
       <p className="t-body muted">
-        <span className="t-data">10 mINTCx</span>, <span className="t-data">10 mINTC</span> and devnet SOL. Once a minute.
+        <span className="t-data">10 mINTCx</span>, <span className="t-data">10 mINTC</span>, <span className="t-data">100 USDC</span> and devnet SOL. Once a minute.
       </p>
       <div style={{ marginTop: "auto" }} className="field">
         <ConnectOr label="Connect wallet">

@@ -1,9 +1,11 @@
 "use client";
 
 import { Buffer } from "buffer";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ComputeBudgetProgram,
+  ConfirmedSignatureInfo,
+  Connection,
   ParsedTransactionWithMeta,
   PublicKey,
   TokenBalance,
@@ -14,11 +16,13 @@ import {
 } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PoolState, SHARE_DECIMALS, VAULT, ata, fetchPool } from "./stockwoven";
+import { USDC_ROUTE } from "./usdcRoute";
 
 export type VaultData = {
   pool: PoolState;
   shareSupply: bigint;
-  user?: { a: bigint; b: bigint; shares: bigint; sol: number };
+  /** Raw token balances; `lamports` is the wallet's SOL in raw units, `sol` the same in SOL. */
+  user?: { a: bigint; b: bigint; shares: bigint; usdc: bigint; sol: number; lamports: bigint };
 };
 
 const tokenAmount = (data?: Buffer | Uint8Array | null) =>
@@ -44,6 +48,7 @@ export function useVaultData() {
             ata(publicKey, VAULT.mintA),
             ata(publicKey, VAULT.mintB),
             ata(publicKey, VAULT.shareMint),
+            ...(USDC_ROUTE ? [ata(publicKey, USDC_ROUTE.usdc)] : []),
           ]),
           connection.getBalance(publicKey),
         ]);
@@ -51,7 +56,9 @@ export function useVaultData() {
           a: tokenAmount(accounts[0]?.data),
           b: tokenAmount(accounts[1]?.data),
           shares: tokenAmount(accounts[2]?.data),
+          usdc: tokenAmount(accounts[3]?.data),
           sol: lamports / 1e9,
+          lamports: BigInt(lamports),
         };
       }
       setData({ pool, shareSupply: BigInt(supply.value.amount), user });
@@ -134,12 +141,12 @@ export function useFaucet(onDone: () => void) {
 
   const drip = useCallback(async () => {
     if (!publicKey) return;
-    setStatus({ kind: "pending", text: "Sending 10 mINTCx, 10 mINTC and devnet SOL for fees." });
+    setStatus({ kind: "pending", text: "Sending 10 mINTCx, 10 mINTC, 100 test USDC and devnet SOL for fees." });
     try {
       const res = await fetch("/api/faucet", { method: "POST", body: JSON.stringify({ owner: publicKey.toBase58() }) });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        setStatus({ kind: "ok", text: "10 mINTCx and 10 mINTC are in your wallet.", signature: body.signature });
+        setStatus({ kind: "ok", text: "10 mINTCx, 10 mINTC and 100 test USDC are in your wallet.", signature: body.signature });
         onDone();
       } else if (res.status === 429) {
         setStatus({ kind: "err", text: "The faucet sends once a minute per wallet. Try again in a minute." });
@@ -162,12 +169,15 @@ export type Activity = {
   kind: ActivityKind;
   failed: boolean;
   changes: { symbol: string; amount: number }[];
+  /** "loading" while the details are on their way, "unavailable" when the RPC would not return them. */
+  details: "ok" | "loading" | "unavailable";
 };
 
 const SYMBOLS: [PublicKey, string][] = [
   [VAULT.shareMint, "swINTC"],
   [VAULT.mintA, "mINTCx"],
   [VAULT.mintB, "mINTC"],
+  ...(USDC_ROUTE ? [[USDC_ROUTE.usdc, "USDC"] as [PublicKey, string]] : []),
 ];
 
 function delta(tx: ParsedTransactionWithMeta, owner: string, mint: PublicKey) {
@@ -178,63 +188,123 @@ function delta(tx: ParsedTransactionWithMeta, owner: string, mint: PublicKey) {
   return sum(tx.meta?.postTokenBalances) - sum(tx.meta?.preTokenBalances);
 }
 
-function classify(changes: Map<string, number>): ActivityKind {
+/** The wallet's SOL change, leaving out the network fee it paid. */
+function solDelta(tx: ParsedTransactionWithMeta, owner: string) {
+  const i = tx.transaction.message.accountKeys.findIndex((k) => k.pubkey.toBase58() === owner);
+  if (i < 0 || !tx.meta) return 0;
+  const fee = i === 0 ? tx.meta.fee : 0;
+  return (tx.meta.postBalances[i] - tx.meta.preBalances[i] + fee) / 1e9;
+}
+
+function classify(changes: Map<string, number>, logs: string[]): ActivityKind {
   const [shares, a, b] = [changes.get("swINTC") ?? 0, changes.get("mINTCx") ?? 0, changes.get("mINTC") ?? 0];
   if (shares > 0) return "Deposit";
   if (shares < 0) return "Redeem";
   if ((a < 0 && b > 0) || (a > 0 && b < 0)) return "Convert";
   if (a > 0 && b > 0) return "Test tokens";
+  // No balance moved, e.g. a failed transaction: name it after the instruction it ran.
+  const ran = (name: string) => logs.includes(`Program log: Instruction: ${name}`);
+  if (ran("Deposit") || ran("DepositSingle")) return "Deposit";
+  if (ran("Redeem")) return "Redeem";
+  if (ran("Swap")) return "Convert";
   return "Other";
 }
 
+function toActivity(sig: ConfirmedSignatureInfo, owner: string, tx: ParsedTransactionWithMeta | null | undefined): Activity {
+  const base = { signature: sig.signature, time: sig.blockTime ? new Date(sig.blockTime * 1000) : null, failed: !!sig.err };
+  if (!tx) return { ...base, kind: "Other", changes: [], details: tx === undefined ? "loading" : "unavailable" };
+  const changes = new Map<string, number>();
+  for (const [mint, symbol] of SYMBOLS) {
+    const d = delta(tx, owner, mint);
+    if (Math.abs(d) >= 10 ** -SHARE_DECIMALS) changes.set(symbol, d);
+  }
+  const sol = solDelta(tx, owner);
+  if (Math.abs(sol) >= 0.0001) changes.set("SOL", sol);
+  return {
+    ...base,
+    kind: classify(changes, tx.meta?.logMessages ?? []),
+    changes: [...changes].map(([symbol, amount]) => ({ symbol, amount })),
+    details: "ok",
+  };
+}
+
+/** Confirmed transactions never change, so each is fetched once per page load. */
+const parsed = new Map<string, ParsedTransactionWithMeta>();
+
+/** One transaction at a time, because public RPCs rate-limit batches. Retries a 429 with backoff. */
+async function fetchParsed(connection: Connection, signature: string) {
+  const cached = parsed.get(signature);
+  if (cached) return cached;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const tx = await connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+      if (tx) parsed.set(signature, tx);
+      return tx;
+    } catch (e) {
+      if (attempt >= 4 || !/429|too many requests/i.test(String(e))) return null;
+      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
+    }
+  }
+}
+
 /**
- * The connected wallet's latest vault activity. Every deposit, redeem, conversion and faucet drip
- * touches the wallet's mINTCx account, so its signatures are the history.
+ * A wallet's latest vault activity. Every deposit, redeem, conversion and faucet drip touches the
+ * wallet's mINTCx account, so its signatures are the history. `onRows` gets the rows as soon as
+ * the signatures arrive, then again as each transaction's details load; it stops once `stale()`.
  */
+export async function loadActivity(
+  connection: Connection,
+  wallet: PublicKey,
+  limit: number,
+  onRows: (rows: Activity[]) => void,
+  stale: () => boolean = () => false,
+) {
+  const owner = wallet.toBase58();
+  const signatures = await connection.getSignaturesForAddress(ata(wallet, VAULT.mintA), { limit }, "confirmed");
+  const rows = signatures.map((s) => toActivity(s, owner, parsed.get(s.signature)));
+  if (stale()) return;
+  onRows([...rows]);
+  for (const [i, s] of signatures.entries()) {
+    if (rows[i].details === "ok") continue;
+    const tx = await fetchParsed(connection, s.signature);
+    if (stale()) return;
+    rows[i] = toActivity(s, owner, tx);
+    onRows([...rows]);
+  }
+}
+
+/** The connected wallet's activity, for the portfolio. */
 export function useActivity(limit = 10) {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
   const [items, setItems] = useState<Activity[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // A newer load (wallet switch, refresh) makes an older one stop updating the list.
+  const run = useRef(0);
 
   const load = useCallback(async () => {
+    const id = ++run.current;
     if (!publicKey) {
       setItems(null);
       return;
     }
     setLoading(true);
     try {
-      const signatures = await connection.getSignaturesForAddress(ata(publicKey, VAULT.mintA), { limit });
-      const txs = signatures.length
-        ? await connection.getParsedTransactions(
-            signatures.map((s) => s.signature),
-            { maxSupportedTransactionVersion: 0, commitment: "confirmed" },
-          )
-        : [];
-      const owner = publicKey.toBase58();
-      setItems(
-        signatures.map((s, i) => {
-          const tx = txs[i];
-          const changes = new Map<string, number>();
-          if (tx) for (const [mint, symbol] of SYMBOLS) {
-            const d = delta(tx, owner, mint);
-            if (Math.abs(d) >= 10 ** -SHARE_DECIMALS) changes.set(symbol, d);
-          }
-          return {
-            signature: s.signature,
-            time: s.blockTime ? new Date(s.blockTime * 1000) : null,
-            kind: classify(changes),
-            failed: !!s.err,
-            changes: [...changes].map(([symbol, amount]) => ({ symbol, amount })),
-          };
-        }),
+      await loadActivity(
+        connection,
+        publicKey,
+        limit,
+        (rows) => {
+          setItems(rows);
+          setError(null);
+        },
+        () => id !== run.current,
       );
-      setError(null);
     } catch (e) {
-      setError(explainError(e));
+      if (id === run.current) setError(explainError(e));
     } finally {
-      setLoading(false);
+      if (id === run.current) setLoading(false);
     }
   }, [connection, publicKey, limit]);
 

@@ -1,6 +1,7 @@
-// Creates a mock USDC and one DAMM v2 pool per issuer token against it (mINTCx/USDC, mINTC/USDC),
-// so a single-token deposit can buy the other issuer's token outside the vault's pool. Also
-// creates the address lookup table the app's routed deposit needs to fit in one transaction.
+// Creates a mock USDC and the DAMM v2 pools the app routes through on devnet:
+// - mINTCx/USDC and mINTC/USDC, so a deposit can buy either issuer's token outside the vault's pool;
+// - wSOL/USDC, so a deposit can start from SOL.
+// Also keeps the address lookup table the routed deposits need to fit in one transaction.
 //
 //   KEYPAIR=~/.config/solana/id.json npx tsx scripts/devnet-usdc-routes.ts
 //
@@ -14,6 +15,7 @@ import {
   ComputeBudgetProgram,
   Connection,
   Keypair,
+  LAMPORTS_PER_SOL,
   PublicKey,
   SystemProgram,
   Transaction,
@@ -22,9 +24,11 @@ import {
 } from "@solana/web3.js";
 import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
+  NATIVE_MINT,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createMint,
+  createSyncNativeInstruction,
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
@@ -38,6 +42,8 @@ const INITIALIZE_CUSTOMIZABLE_POOL = [20, 161, 241, 24, 189, 221, 180, 2];
 const USDC_DECIMALS = 6;
 const USD_PER_SHARE = 20n; // mock stock price
 const SHARES_PER_POOL = 200n; // deeper than the vault's pool, so routing through them is cheap
+const USD_PER_SOL = 150n; // mock SOL price
+const SOL_PER_POOL = 2n; // what the admin wallet can spare on devnet
 const TRADE_FEE_BPS = 10;
 const MIN_SQRT_PRICE = 4_295_048_016n;
 const MAX_SQRT_PRICE = 79_226_673_521_066_979_257_578_248_091n;
@@ -74,28 +80,39 @@ function save() {
   console.log("wrote scripts/devnet.json and app/src/lib/devnet.json");
 }
 
-/** cp-amm's accounts for a stock/USDC pool; the pool PDA sorts the two mints. */
-function poolAccounts(stock: PublicKey, usdc: PublicKey) {
-  const [hi, lo] = stock.toBuffer().compare(usdc.toBuffer()) > 0 ? [stock, usdc] : [usdc, stock];
+/** cp-amm's accounts for a token/USDC pool; the pool PDA sorts the two mints. */
+function poolAccounts(token: PublicKey, usdc: PublicKey) {
+  const [hi, lo] = token.toBuffer().compare(usdc.toBuffer()) > 0 ? [token, usdc] : [usdc, token];
   const pool = pda([Buffer.from("cpool"), hi.toBuffer(), lo.toBuffer()], CP_AMM);
   return {
     pool,
-    stockVault: pda([Buffer.from("token_vault"), stock.toBuffer(), pool.toBuffer()], CP_AMM),
+    tokenVault: pda([Buffer.from("token_vault"), token.toBuffer(), pool.toBuffer()], CP_AMM),
     usdcVault: pda([Buffer.from("token_vault"), usdc.toBuffer(), pool.toBuffer()], CP_AMM),
   };
 }
 
-/** A full-range compounding pool of `stock` (token A) against USDC (token B) at USD_PER_SHARE. */
-async function createPool(stock: PublicKey, decimals: number, usdc: PublicKey, payerStock: PublicKey, payerUsdc: PublicKey) {
-  const { pool, stockVault, usdcVault } = poolAccounts(stock, usdc);
+/**
+ * A full-range compounding pool of `token` (token A) against USDC (token B), holding `units` whole
+ * tokens at `usdPerUnit`, created by the admin.
+ */
+async function createPool(
+  token: PublicKey,
+  decimals: number,
+  usdc: PublicKey,
+  payerToken: PublicKey,
+  payerUsdc: PublicKey,
+  units: bigint,
+  usdPerUnit: bigint,
+) {
+  const { pool, tokenVault, usdcVault } = poolAccounts(token, usdc);
   const nftMint = Keypair.generate();
   const position = pda([Buffer.from("position"), nftMint.publicKey.toBuffer()], CP_AMM);
   const positionNftAccount = pda([Buffer.from("position_nft_account"), nftMint.publicKey.toBuffer()], CP_AMM);
 
-  // sqrt(raw USDC per raw stock unit) in Q64.64, and the liquidity that holds SHARES_PER_POOL.
-  const usdcPerShare = USD_PER_SHARE * 10n ** BigInt(USDC_DECIMALS);
-  const sqrtPrice = isqrt((usdcPerShare << 128n) / 10n ** BigInt(decimals));
-  const liquidity = ((SHARES_PER_POOL * usdcPerShare) << 128n) / sqrtPrice;
+  // sqrt(raw USDC per raw token unit) in Q64.64, and the liquidity that holds `units` tokens.
+  const usdcPerUnit = usdPerUnit * 10n ** BigInt(USDC_DECIMALS);
+  const sqrtPrice = isqrt((usdcPerUnit << 128n) / 10n ** BigInt(decimals));
+  const liquidity = ((units * usdcPerUnit) << 128n) / sqrtPrice;
 
   const baseFee = Buffer.alloc(27);
   baseFee.writeBigUInt64LE(BigInt(TRADE_FEE_BPS) * 100_000n);
@@ -110,66 +127,104 @@ async function createPool(stock: PublicKey, decimals: number, usdc: PublicKey, p
     data: Buffer.concat([Buffer.from(INITIALIZE_CUSTOMIZABLE_POOL), params]),
     keys: [
       r(payer.publicKey), w(nftMint.publicKey, true), w(positionNftAccount), w(payer.publicKey, true),
-      r(DAMM_POOL_AUTHORITY), w(pool), w(position), r(stock), r(usdc), w(stockVault), w(usdcVault),
-      w(payerStock), w(payerUsdc), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID),
+      r(DAMM_POOL_AUTHORITY), w(pool), w(position), r(token), r(usdc), w(tokenVault), w(usdcVault),
+      w(payerToken), w(payerUsdc), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID),
       r(SystemProgram.programId), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
     ],
   })], [nftMint]);
-  return { pool: pool.toBase58(), stockVault: stockVault.toBase58(), usdcVault: usdcVault.toBase58() };
+  return { pool: pool.toBase58(), tokenVault: tokenVault.toBase58(), usdcVault: usdcVault.toBase58() };
 }
+
+const ataOf = async (mint: PublicKey) => (await getOrCreateAssociatedTokenAccount(conn, payer, mint, payer.publicKey)).address;
 
 async function createRoutes() {
   const mintA = new PublicKey(devnet.mintA);
   const mintB = new PublicKey(devnet.mintB);
-  const ataOf = async (mint: PublicKey) => (await getOrCreateAssociatedTokenAccount(conn, payer, mint, payer.publicKey)).address;
-
   const usdc = await createMint(conn, payer, payer.publicKey, null, USDC_DECIMALS);
   const payerUsdc = await ataOf(usdc);
   await mintTo(conn, payer, usdc, payerUsdc, payer, 100_000n * 10n ** BigInt(USDC_DECIMALS));
   console.log("mock USDC", usdc.toBase58());
 
-  const a = await createPool(mintA, devnet.decimalsA, usdc, await ataOf(mintA), payerUsdc);
+  const route = async (mint: PublicKey, decimals: number) => {
+    const p = await createPool(mint, decimals, usdc, await ataOf(mint), payerUsdc, SHARES_PER_POOL, USD_PER_SHARE);
+    return { pool: p.pool, stockVault: p.tokenVault, usdcVault: p.usdcVault };
+  };
+  const a = await route(mintA, devnet.decimalsA);
   console.log("mINTCx/USDC pool", a.pool);
-  const b = await createPool(mintB, devnet.decimalsB, usdc, await ataOf(mintB), payerUsdc);
+  const b = await route(mintB, devnet.decimalsB);
   console.log("mINTC/USDC pool", b.pool);
   Object.assign(devnet, { usdcMint: usdc.toBase58(), usdcDecimals: USDC_DECIMALS, usdcRoutes: { a, b } });
   save();
 }
 
+/** Wraps SOL until the admin's wSOL account holds `lamports`. */
+async function wrapSol(lamports: bigint) {
+  const wsol = await ataOf(NATIVE_MINT);
+  const held = BigInt((await conn.getTokenAccountBalance(wsol)).value.amount);
+  if (held < lamports) {
+    await send([
+      SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: wsol, lamports: lamports - held }),
+      createSyncNativeInstruction(wsol),
+    ]);
+  }
+  return wsol;
+}
+
+/** wSOL/USDC, seeded with SOL the admin wraps. */
+async function createSolRoute() {
+  const usdc = new PublicKey(devnet.usdcMint);
+  // cp-amm rounds the amounts it pulls up, so wrap a little more than the pool holds.
+  const wsol = await wrapSol(SOL_PER_POOL * BigInt(LAMPORTS_PER_SOL) + 10_000_000n);
+  const p = await createPool(NATIVE_MINT, 9, usdc, wsol, await ataOf(usdc), SOL_PER_POOL, USD_PER_SOL);
+  console.log("wSOL/USDC pool", p.pool);
+  devnet.solRoute = { pool: p.pool, solVault: p.tokenVault, usdcVault: p.usdcVault };
+  save();
+}
+
 /** Every fixed account of a routed deposit, so the transaction carries one byte per account. */
-async function createLookupTable() {
+async function ensureLookupTable() {
   const routes = [devnet.usdcRoutes.a, devnet.usdcRoutes.b];
-  const addresses = [
+  const wanted = [
     CP_AMM, DAMM_POOL_AUTHORITY, DAMM_EVENT_AUTHORITY, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID,
     SystemProgram.programId, ComputeBudgetProgram.programId,
     ...["program", "vault", "shareMint", "reserveA", "reserveB", "pool", "position", "positionNftAccount",
       "tokenAVault", "tokenBVault", "mintA", "mintB", "usdcMint"].map((k) => new PublicKey(devnet[k])),
     ...routes.flatMap((route) => [route.pool, route.stockVault, route.usdcVault].map((a) => new PublicKey(a))),
+    ...(devnet.solRoute
+      ? [NATIVE_MINT, ...[devnet.solRoute.pool, devnet.solRoute.solVault, devnet.solRoute.usdcVault].map((a) => new PublicKey(a))]
+      : []),
   ];
-  // The recent slot must still be in the SlotHashes sysvar.
-  const [createIx, lookupTable] = AddressLookupTableProgram.createLookupTable({
-    authority: payer.publicKey,
-    payer: payer.publicKey,
-    recentSlot: (await conn.getSlot("confirmed")) - 1,
-  });
-  await send([createIx]);
-  for (let i = 0; i < addresses.length; i += 20) {
+
+  if (!devnet.lookupTable) {
+    // The recent slot must still be in the SlotHashes sysvar.
+    const [createIx, table] = AddressLookupTableProgram.createLookupTable({
+      authority: payer.publicKey,
+      payer: payer.publicKey,
+      recentSlot: (await conn.getSlot("confirmed")) - 1,
+    });
+    await send([createIx]);
+    devnet.lookupTable = table.toBase58();
+    save();
+  }
+  const lookupTable = new PublicKey(devnet.lookupTable);
+  const current = (await conn.getAddressLookupTable(lookupTable)).value?.state.addresses ?? [];
+  const missing = wanted.filter((a) => !current.some((c) => c.equals(a)));
+  for (let i = 0; i < missing.length; i += 20) {
     await send([AddressLookupTableProgram.extendLookupTable({
       lookupTable,
       authority: payer.publicKey,
       payer: payer.publicKey,
-      addresses: addresses.slice(i, i + 20),
+      addresses: missing.slice(i, i + 20),
     })]);
   }
-  console.log("lookup table", lookupTable.toBase58(), `(${addresses.length} addresses)`);
-  devnet.lookupTable = lookupTable.toBase58();
-  save();
+  console.log("lookup table", lookupTable.toBase58(), `(${current.length + missing.length} addresses, ${missing.length} added)`);
 }
 
 async function main() {
   console.log("payer", payer.publicKey.toBase58(), (await conn.getBalance(payer.publicKey)) / 1e9, "SOL");
   if (!devnet.usdcMint) await createRoutes();
-  if (!devnet.lookupTable) await createLookupTable();
+  if (!devnet.solRoute) await createSolRoute();
+  await ensureLookupTable();
 }
 
 main().catch((e) => {

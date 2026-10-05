@@ -18,7 +18,17 @@ import {
   stockValue,
   toRaw,
 } from "@/lib/stockwoven";
-import { ROUTE_SLIPPAGE_BPS, USDC_ROUTE, quoteRoutedDeposit, routedDepositIxs } from "@/lib/usdcRoute";
+import {
+  ROUTE_SLIPPAGE_BPS,
+  SOL_ROUTE,
+  USDC_ROUTE,
+  quoteRoutedDeposit,
+  quoteSolDeposit,
+  quoteUsdcDeposit,
+  routedDepositIxs,
+  solDepositIxs,
+  usdcDepositIxs,
+} from "@/lib/usdcRoute";
 import { AmountField, isAmount } from "../AmountField";
 import { Button, Ticker } from "../ds";
 import { LearnMore } from "../LearnMore";
@@ -28,11 +38,33 @@ import { useVault } from "./VaultData";
 
 const SLIPPAGE_BPS = 50n;
 const MODES = ["deposit", "redeem"] as const;
-const SOURCES = [
-  { key: "both", label: "Both" },
-  { key: "a", label: "mINTCx" },
-  { key: "b", label: "mINTC" },
-] as const;
+
+type Source = "both" | "a" | "b" | "usdc" | "sol";
+const SOURCES: { key: Source; label: string; start: string }[] = [
+  { key: "both", label: "Both", start: "1" },
+  { key: "a", label: "mINTCx", start: "1" },
+  { key: "b", label: "mINTC", start: "1" },
+  ...(USDC_ROUTE ? [{ key: "usdc" as const, label: "USDC", start: "20" }] : []),
+  ...(SOL_ROUTE ? [{ key: "sol" as const, label: "SOL", start: "0.1" }] : []),
+];
+
+/** SOL kept back for the network fee and the token accounts a deposit may open. */
+const SOL_RESERVE = 10_000_000n;
+
+/** How a one-token deposit reaches the vault: its own pool, or USDC pools. */
+type Route = "vault" | "issuer-via-usdc" | "usdc" | "sol";
+const ROUTE_LABEL: Record<Route, string> = {
+  vault: "Vault's pool",
+  "issuer-via-usdc": "USDC pools",
+  usdc: "USDC pools → both tokens",
+  sol: "SOL → USDC → both tokens",
+};
+const ROUTE_FEES: Record<Route, string> = {
+  vault: `${(ZAP_FEE_BPS / 100).toFixed(2)}% + conversion fee`,
+  "issuer-via-usdc": "2 conversions, no vault fee",
+  usdc: "2 conversions, no vault fee",
+  sol: "3 conversions, no vault fee",
+};
 
 export function VaultPanel() {
   const { data, refresh } = useVault();
@@ -40,53 +72,76 @@ export function VaultPanel() {
   const picker = useWalletPicker();
   const { send, status } = useSend(refresh);
   const [mode, setMode] = useState<(typeof MODES)[number]>("deposit");
-  const [source, setSource] = useState<(typeof SOURCES)[number]["key"]>("both");
+  const [source, setSource] = useState<Source>("both");
   const [amount, setAmount] = useState("1");
 
   const user = data?.user;
   const pending = status?.kind === "pending";
   const deposit = mode === "deposit";
-  const single = deposit && source !== "both";
+  const oneToken = deposit && source !== "both";
   const inputIsA = source === "a";
-  const [inSymbol, inDecimals, inBalance] = inputIsA
-    ? ["mINTCx", VAULT.decimalsA, user?.a]
-    : ["mINTC", VAULT.decimalsB, user?.b];
+  const input = {
+    a: { symbol: "mINTCx", decimals: VAULT.decimalsA, balance: user?.a },
+    b: { symbol: "mINTC", decimals: VAULT.decimalsB, balance: user?.b },
+    usdc: { symbol: "USDC", decimals: 6, balance: user?.usdc },
+    sol: { symbol: "SOL", decimals: 9, balance: user?.lamports },
+    both: { symbol: "", decimals: SHARE_DECIMALS, balance: undefined },
+  }[source];
 
-  const raw = isAmount(amount) ? toRaw(amount, single ? inDecimals : SHARE_DECIMALS) : 0n;
-  const quote = data && !single && raw > 0n ? quoteShares(data.pool, data.shareSupply, raw, deposit) : null;
-  const inPoolShares = data && single && raw > 0n ? quoteDepositSingle(data.pool, data.shareSupply, inputIsA, raw) : null;
-  const routed = data && single && raw > 0n ? quoteRoutedDeposit(data.pool, data.shareSupply, inputIsA, raw) : null;
-  // Whichever route mints more swINTC. Through the USDC pools, the vault's pool grows in both tokens.
+  const raw = isAmount(amount) ? toRaw(amount, oneToken ? input.decimals : SHARE_DECIMALS) : 0n;
+  const ready = !!data && raw > 0n && deposit;
+  const quote = data && !oneToken && raw > 0n ? quoteShares(data.pool, data.shareSupply, raw, deposit) : null;
+
+  // One issuer's token: the vault's own pool or the USDC pools, whichever mints more swINTC.
+  const issuer = ready && (source === "a" || source === "b");
+  const inPoolShares = issuer ? quoteDepositSingle(data.pool, data.shareSupply, inputIsA, raw) : null;
+  const routed = issuer ? quoteRoutedDeposit(data.pool, data.shareSupply, inputIsA, raw) : null;
   const viaUsdc = !!routed && (inPoolShares === null || routed.shares >= inPoolShares);
-  const singleShares = viaUsdc ? routed.shares : inPoolShares;
+  // USDC or SOL: always through the USDC pools.
+  const usdcQuote = ready && source === "usdc" ? quoteUsdcDeposit(data.pool, data.shareSupply, raw) : null;
+  const solQuote = ready && source === "sol" ? quoteSolDeposit(data.pool, data.shareSupply, raw) : null;
+
+  const route: Route = source === "usdc" ? "usdc" : source === "sol" ? "sol" : viaUsdc ? "issuer-via-usdc" : "vault";
+  const outShares =
+    source === "usdc" ? (usdcQuote?.shares ?? null)
+    : source === "sol" ? (solQuote?.usdc.shares ?? null)
+    : viaUsdc ? routed.shares
+    : inPoolShares;
   const otherSymbol = inputIsA ? "mINTC" : "mINTCx";
 
   let problem: string | null = null;
   if (!isAmount(amount)) problem = "Enter a valid amount";
-  else if (single ? singleShares === null : !quote) problem = data ? "Enter an amount" : "Loading the pool…";
-  else if (single && singleShares === 0n) problem = "Amount too small";
-  else if (single && inBalance !== undefined && inBalance < raw) problem = `Not enough ${inSymbol}`;
-  else if (!single && deposit && user && quote && (user.a < quote.a || user.b < quote.b)) problem = "Not enough test tokens";
+  else if (oneToken ? outShares === null : !quote) problem = data ? "Enter an amount" : "Loading the pool…";
+  else if (oneToken && outShares === 0n) problem = "Amount too small";
+  else if (source === "sol" && deposit && user && user.lamports < raw) problem = "Not enough SOL";
+  else if (source === "sol" && deposit && user && user.lamports < raw + SOL_RESERVE) problem = "Keep 0.01 SOL for fees";
+  else if (oneToken && input.balance !== undefined && input.balance < raw) problem = `Not enough ${input.symbol}`;
+  else if (!oneToken && deposit && user && quote && (user.a < quote.a || user.b < quote.b)) problem = "Not enough test tokens";
   else if (!deposit && user && user.shares < raw) problem = "Not enough swINTC";
 
   function submit() {
     if (!publicKey) return;
-    if (single && viaUsdc && USDC_ROUTE) {
-      send("Deposit", [...ensureAccountsIxs(publicKey), ...routedDepositIxs(publicKey, routed)], USDC_ROUTE.lookupTable);
-    } else if (single) {
-      if (!singleShares) return;
-      const minShares = (singleShares * (10_000n - SLIPPAGE_BPS)) / 10_000n;
-      send("Deposit", [...ensureAccountsIxs(publicKey), depositSingleIx(publicKey, inputIsA, raw, minShares)]);
+    const accounts = ensureAccountsIxs(publicKey);
+    if (source === "usdc" && deposit && usdcQuote && USDC_ROUTE) {
+      send("Deposit", [...accounts, ...usdcDepositIxs(publicKey, usdcQuote)], USDC_ROUTE.lookupTable);
+    } else if (source === "sol" && deposit && solQuote && USDC_ROUTE) {
+      send("Deposit", [...accounts, ...solDepositIxs(publicKey, solQuote)], USDC_ROUTE.lookupTable);
+    } else if (issuer && viaUsdc && USDC_ROUTE) {
+      send("Deposit", [...accounts, ...routedDepositIxs(publicKey, routed)], USDC_ROUTE.lookupTable);
+    } else if (issuer) {
+      if (!inPoolShares) return;
+      const minShares = (inPoolShares * (10_000n - SLIPPAGE_BPS)) / 10_000n;
+      send("Deposit", [...accounts, depositSingleIx(publicKey, inputIsA, raw, minShares)]);
     } else if (!quote) {
       return;
     } else if (deposit) {
       const maxA = (quote.a * (10_000n + SLIPPAGE_BPS)) / 10_000n + 1n;
       const maxB = (quote.b * (10_000n + SLIPPAGE_BPS)) / 10_000n + 1n;
-      send("Deposit", [...ensureAccountsIxs(publicKey), depositIx(publicKey, raw, maxA, maxB)]);
+      send("Deposit", [...accounts, depositIx(publicKey, raw, maxA, maxB)]);
     } else {
       const minA = (quote.a * (10_000n - SLIPPAGE_BPS)) / 10_000n;
       const minB = (quote.b * (10_000n - SLIPPAGE_BPS)) / 10_000n;
-      send("Redeem", [...ensureAccountsIxs(publicKey), redeemIx(publicKey, raw, minA, minB)]);
+      send("Redeem", [...accounts, redeemIx(publicKey, raw, minA, minB)]);
     }
   }
 
@@ -95,6 +150,11 @@ export function VaultPanel() {
     const next = deposit ? "redeem" : "deposit";
     setMode(next);
     document.getElementById(`tab-${next}`)?.focus();
+  }
+
+  function pickSource(next: Source) {
+    setSource(next);
+    setAmount(SOURCES.find((s) => s.key === next)?.start ?? "1");
   }
 
   const maxButton = (value: bigint, decimals: number) => (
@@ -106,6 +166,8 @@ export function VaultPanel() {
       Max
     </button>
   );
+  // For SOL, Max leaves the fee reserve in the wallet.
+  const spendable = source === "sol" && input.balance !== undefined ? input.balance - SOL_RESERVE : input.balance;
 
   return (
     <section className="tile panel" id="vault-panel" aria-label="Deposit or redeem swINTC">
@@ -133,14 +195,14 @@ export function VaultPanel() {
             <span className="t-label" id="pay-with">
               Pay with
             </span>
-            <div className="tabs tabs--three" role="group" aria-labelledby="pay-with">
+            <div className="tabs tabs--sources" role="group" aria-labelledby="pay-with">
               {SOURCES.map((s) => (
                 <button
                   key={s.key}
                   type="button"
                   className="t-label"
                   aria-pressed={source === s.key}
-                  onClick={() => setSource(s.key)}
+                  onClick={() => pickSource(s.key)}
                 >
                   {s.label}
                 </button>
@@ -149,14 +211,14 @@ export function VaultPanel() {
           </div>
         )}
 
-        {single ? (
+        {oneToken ? (
           <AmountField
-            label={`${inSymbol} to deposit`}
+            label={`${input.symbol} to deposit`}
             value={amount}
             onChange={setAmount}
-            suffix={inSymbol}
-            hint={inBalance !== undefined && `Balance: ${fromRaw(inBalance, inDecimals)} ${inSymbol}`}
-            action={inBalance !== undefined && inBalance > 0n && maxButton(inBalance, inDecimals)}
+            suffix={input.symbol}
+            hint={input.balance !== undefined && `Balance: ${fromRaw(input.balance, input.decimals)} ${input.symbol}`}
+            action={spendable !== undefined && spendable > 0n && maxButton(spendable, input.decimals)}
           />
         ) : (
           <AmountField
@@ -182,14 +244,14 @@ export function VaultPanel() {
           />
         )}
 
-        {single ? (
+        {oneToken ? (
           <dl className="kv">
             <div>
-              <dt className="t-body">{viaUsdc ? "You receive" : "You receive about"}</dt>
+              <dt className="t-body">{route === "vault" ? "You receive about" : "You receive"}</dt>
               <dd className="t-data">
-                {singleShares ? (
+                {outShares ? (
                   <>
-                    {fromRaw(singleShares, SHARE_DECIMALS, 6)} <Ticker ticker="INTC" />
+                    {fromRaw(outShares, SHARE_DECIMALS, 6)} <Ticker ticker="INTC" />
                   </>
                 ) : (
                   "—"
@@ -199,24 +261,26 @@ export function VaultPanel() {
             <div>
               <dt className="t-body">Worth</dt>
               <dd className="t-data">
-                {singleShares && data
-                  ? `${((Number(singleShares) / 10 ** SHARE_DECIMALS) * navPerShare(data.pool, data.shareSupply)).toFixed(6)} INTC`
+                {outShares && data
+                  ? `${((Number(outShares) / 10 ** SHARE_DECIMALS) * navPerShare(data.pool, data.shareSupply)).toFixed(6)} INTC`
                   : "—"}
               </dd>
             </div>
             <div>
               <dt className="t-body">Route</dt>
-              <dd className="t-data">{viaUsdc ? `USDC pools → ${otherSymbol}` : "Vault's pool"}</dd>
-            </div>
-            <div>
-              <dt className="t-body">Fees</dt>
               <dd className="t-data">
-                {viaUsdc ? "2 conversions, no vault fee" : `${(ZAP_FEE_BPS / 100).toFixed(2)}% + conversion fee`}
+                {route === "issuer-via-usdc" ? `${ROUTE_LABEL[route]} → ${otherSymbol}` : ROUTE_LABEL[route]}
               </dd>
             </div>
             <div>
+              <dt className="t-body">Fees</dt>
+              <dd className="t-data">{ROUTE_FEES[route]}</dd>
+            </div>
+            <div>
               <dt className="t-body">Slippage limit</dt>
-              <dd className="t-data">{Number(viaUsdc ? ROUTE_SLIPPAGE_BPS : SLIPPAGE_BPS) / 100}%</dd>
+              <dd className="t-data">
+                {route === "vault" ? `${Number(SLIPPAGE_BPS) / 100}%` : `${Number(ROUTE_SLIPPAGE_BPS) / 100}% per conversion`}
+              </dd>
             </div>
           </dl>
         ) : (
@@ -259,19 +323,25 @@ export function VaultPanel() {
           <span className="t-body muted">
             {!deposit
               ? "Always open."
-              : single && viaUsdc
-                ? `Part of it buys ${otherSymbol} through USDC, then both go in at the pool's mix.`
-                : single
-                ? "The vault converts part of it on the pool, then deposits both."
-                : "Both issuers' tokens go in at the pool's current mix."}
+              : route === "usdc" && oneToken
+                ? "USDC buys both issuers' tokens at the pool's mix, then both go in."
+                : route === "sol" && oneToken
+                  ? "SOL becomes USDC, which buys both issuers' tokens for the deposit."
+                  : route === "issuer-via-usdc" && oneToken
+                    ? `Part of it buys ${otherSymbol} through USDC, then both go in at the pool's mix.`
+                    : oneToken
+                      ? "The vault converts part of it on the pool, then deposits both."
+                      : "Both issuers' tokens go in at the pool's current mix."}
           </span>{" "}
           <LearnMore
             href={
               !deposit
                 ? "/docs/redeem#how-a-redemption-works"
-                : single
-                  ? "/docs/deposit#single-token-deposits"
-                  : "/docs/deposit#how-a-deposit-is-priced"
+                : source === "usdc" || source === "sol"
+                  ? "/docs/deposit#deposit-with-usdc-or-sol"
+                  : oneToken
+                    ? "/docs/deposit#single-token-deposits"
+                    : "/docs/deposit#how-a-deposit-is-priced"
             }
           />
         </p>

@@ -154,23 +154,26 @@ export type Reserves = { reserveA: bigint; reserveB: bigint };
 export type PoolState = Reserves & {
   liquidity: bigint;
   vaultLiquidity: bigint;
-  routes?: { a: Reserves; b: Reserves };
+  routes?: { a: Reserves; b: Reserves; sol?: Reserves };
 };
 
 const u128 = (d: Buffer, offset: number) => d.readBigUInt64LE(offset) + (d.readBigUInt64LE(offset + 8) << 64n);
 const reserves = (d: Buffer): Reserves => ({ reserveA: d.readBigUInt64LE(680), reserveB: d.readBigUInt64LE(688) });
 
-/** Reads cp-amm's Pool, the vault's Position and any USDC route pools (offsets include the 8-byte discriminator). */
+/** Reads cp-amm's Pool, the vault's Position and any route pools (offsets include the 8-byte discriminator). */
 export async function fetchPool(conn: Connection): Promise<PoolState> {
-  const routePools = devnet.usdcRoutes ? [devnet.usdcRoutes.a.pool, devnet.usdcRoutes.b.pool].map((k) => new PublicKey(k)) : [];
-  const [pool, position, routeA, routeB] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position, ...routePools]);
+  const routePools = [devnet.usdcRoutes?.a.pool, devnet.usdcRoutes?.b.pool, devnet.solRoute?.pool]
+    .filter((k): k is string => !!k)
+    .map((k) => new PublicKey(k));
+  const [pool, position, routeA, routeB, routeSol] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position, ...routePools]);
   if (!pool || !position) throw new Error("pool not found");
   const d = Buffer.from(pool.data);
+  const read = (info: typeof pool) => reserves(Buffer.from(info.data));
   return {
     liquidity: u128(d, 360),
     ...reserves(d),
     vaultLiquidity: u128(Buffer.from(position.data), 152),
-    routes: routeA && routeB ? { a: reserves(Buffer.from(routeA.data)), b: reserves(Buffer.from(routeB.data)) } : undefined,
+    routes: routeA && routeB ? { a: read(routeA), b: read(routeB), sol: routeSol ? read(routeSol) : undefined } : undefined,
   };
 }
 

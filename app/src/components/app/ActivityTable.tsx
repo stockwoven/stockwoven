@@ -100,14 +100,18 @@ export function ActivityTable({
                           <td>
                             <span className="td-label t-eyebrow">Action</span>
                             <span className="t-label">
-                              {item.kind}
+                              {item.details === "loading" ? <span className="skeleton" style={{ width: "8ch" }} /> : item.kind}
                               {item.failed && <span className="t-eyebrow muted"> · Failed</span>}
                             </span>
                           </td>
                           <td>
                             <span className="td-label t-eyebrow">Change</span>
                             <span className="amounts" style={{ alignItems: "inherit" }}>
-                              {item.changes.length ? (
+                              {item.details === "loading" ? (
+                                <span className="skeleton" style={{ width: "14ch" }} aria-label="Loading" />
+                              ) : item.details === "unavailable" ? (
+                                <span className="t-data muted">Details unavailable</span>
+                              ) : item.changes.length ? (
                                 item.changes.map((c) => (
                                   <span key={c.symbol} className="t-data nowrap">
                                     {signed(c.amount)} <WithTickers>{c.symbol}</WithTickers>

@@ -36,6 +36,19 @@ In tests, a single-token deposit of 0.1% of the pool gets back 99.74% on an imme
 
 When the vault's pool is short of the token you bring, it pays more for it, so this route can mint more swINTC. Such a deposit also pulls the pool back toward one-to-one.
 
+## Deposit with USDC or SOL
+
+You can start from USDC or SOL instead of a stock token.
+
+- **USDC** is split between the two stock/USDC pools, buying mINTCx and mINTC in the vault pool's mix. Both then go in as a normal deposit. Two conversion fees.
+- **SOL** is first wrapped and swapped for USDC in a SOL/USDC pool, then follows the USDC route. Three conversion fees. The temporary wrapped-SOL account is closed in the same transaction, so its rent comes back.
+
+Either way the vault's pool grows in both tokens, and there is no vault fee. Each conversion must fill within 0.1% of its quote, or the whole transaction fails. Whatever the deposit does not take stays in your wallet.
+
+The app keeps 0.01 SOL in your wallet for the network fee and the token accounts a first deposit opens.
+
+On devnet these routes use test pools with fixed starting prices: 20 USDC per share of stock and 150 USDC per SOL. The SOL/USDC pool is small (2 SOL), so a large SOL deposit pays a visible price impact.
+
 ## Slippage limit
 
 The app allows up to 0.5% more of each token than the quote. Whatever cp-amm does not take is refunded in the same transaction.
@@ -48,6 +61,6 @@ The admin can pause deposits as a circuit breaker for issuer events (pause, free
 
 ## Test tokens
 
-On devnet, the faucet in the app's Devnet tab sends 10 mINTCx, 10 mINTC and a little devnet SOL for fees, once a minute per wallet.
+On devnet, the faucet in the app's Devnet tab sends 10 mINTCx, 10 mINTC, 100 test USDC and a little devnet SOL for fees, once a minute per wallet. For deposits in SOL, get more devnet SOL from faucet.solana.com.
 
 <Todo>Mainnet deposit requirements (supported issuer tokens, minimums) are not decided yet.</Todo>

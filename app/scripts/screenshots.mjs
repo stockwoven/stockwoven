@@ -49,11 +49,11 @@ function positionData() {
   b.writeBigUInt64LE(vaultLiquidity >> 64n, 160);
   return b.toString("base64");
 }
-// A stock/USDC route pool: 200 shares of stock against 4,000 USDC.
-function routePoolData(stockDecimals) {
+// A route pool against USDC: 200 shares of stock for 4,000 USDC, or 2 SOL for 300 USDC.
+function routePoolData(tokenDecimals, units = 200n, usdc = 4_000_000_000n) {
   const b = Buffer.alloc(1112);
-  b.writeBigUInt64LE(200n * 10n ** BigInt(stockDecimals), 680);
-  b.writeBigUInt64LE(4_000_000_000n, 688);
+  b.writeBigUInt64LE(units * 10n ** BigInt(tokenDecimals), 680);
+  b.writeBigUInt64LE(usdc, 688);
   return b.toString("base64");
 }
 function tokenAccount(amount) {
@@ -138,10 +138,11 @@ function rpc(method, params, opts) {
           account(positionData(), cpAmm),
           account(routePoolData(DEVNET.decimalsA), cpAmm),
           account(routePoolData(DEVNET.decimalsB), cpAmm),
+          account(routePoolData(9, 2n, 300_000_000n), cpAmm),
         ]);
       }
-      const [a, b, s] = opts.empty ? [10e8, 10e6, 0] : [8.75 * 1e8, 9.25 * 1e6, 12.345678 * 1e8];
-      return ctx([account(tokenAccount(a)), account(tokenAccount(b)), account(tokenAccount(s))]);
+      const [a, b, s, u] = opts.empty ? [10e8, 10e6, 0, 100e6] : [8.75 * 1e8, 9.25 * 1e6, 12.345678 * 1e8, 64.5e6];
+      return ctx([account(tokenAccount(a)), account(tokenAccount(b)), account(tokenAccount(s)), account(tokenAccount(u))]);
     }
     case "getBalance":
       return ctx(opts.empty ? 20_000_000 : 1_482_000_000);
@@ -352,6 +353,8 @@ try {
       await shot("tx-failed", "app", { connected: true, mode: "reject" }, deposit, "#vault-panel");
       await shot("redeem-tab", "app", { connected: true }, (p) => p.click("#tab-redeem"), "#vault-panel");
       await shot("deposit-single", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=mINTCx"), "#vault-panel");
+      await shot("deposit-usdc", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=USDC"), "#vault-panel");
+      await shot("deposit-sol", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=SOL"), "#vault-panel");
       await shot("portfolio-empty", "app/portfolio", { connected: true, empty: true }, null, ".app-main");
       await shot("portfolio-disconnected", "app/portfolio", {}, null, ".app-main");
       await shot(

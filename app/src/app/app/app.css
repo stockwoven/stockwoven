@@ -53,14 +53,25 @@
   min-height: 44px;
 }
 
-/* Deposit source: both tokens or one issuer's. Toggle buttons styled like the selected tab. */
-.tabs--three {
+/* Deposit source: both tokens, one issuer's, USDC or SOL. Toggle buttons styled like the
+   selected tab; three per row on a narrow panel, all five in a row on a wide one. */
+.panel__body {
+  container-type: inline-size;
+}
+
+.tabs--sources {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   align-self: stretch;
 }
 
-.tabs--three button {
+@container (min-width: 440px) {
+  .tabs--sources {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+.tabs--sources button {
   min-width: 0;
   padding-inline: var(--space-2);
 }
