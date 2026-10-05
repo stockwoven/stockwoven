@@ -8,11 +8,21 @@ Hand over the vault's current mix of mINTCx and mINTC. Receive swINTC.
 
 Both issuers' tokens go in at the pool's current mix. No price oracle: everyone adds liquidity at the same ratio.
 
-You choose how much swINTC to receive. Each share adds exactly `liquidity_per_share` liquidity to the vault's position, and cp-amm takes the matching amount of each token, rounding up against the depositor.
+You choose how much swINTC to receive. Each share adds its pro-rata slice of the vault's position liquidity, and cp-amm takes the matching amount of each token, rounding up against the depositor.
 
-## Proportional deposits only
+## Single-token deposits
 
-cp-amm's compounding mode has no single-sided add. A single-token "zap" (swap half, then deposit) belongs in the client or a later instruction.
+You can also deposit just one issuer's token. The vault swaps the right part of it on the Meteora pool, at the pool's price, adds both tokens as liquidity and refunds the dust in the same transaction.
+
+A single-token deposit costs a little more than a proportional one:
+
+- the pool's conversion fee on the part that is swapped,
+- price impact from that swap,
+- a 0.05% vault fee, which stays in the position and raises the value of every existing swINTC.
+
+In tests, a single-token deposit of 0.1% of the pool gets back 99.74% on an immediate redeem. You set a minimum amount of swINTC to receive. If the pool moves past it, the transaction fails.
+
+<Todo>The app's Deposit tab does not offer single-token deposits yet.</Todo>
 
 ## Slippage limit
 

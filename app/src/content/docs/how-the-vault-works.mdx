@@ -13,7 +13,7 @@ traders / Jupiter ──swap──▶ DAMM v2 pool (INTCx ↔ INTC, collect_fee_
                               ▼
                     position NFT owned by the vault PDA
                               │
-          deposit / redeem ───┤ shares ↔ fixed liquidity units
+          deposit / redeem ───┤ shares ↔ pro-rata liquidity
                               ▼
                      swINTC (SPL mint, authority = vault PDA)
 ```
@@ -22,16 +22,24 @@ The vault program is not in the swap path. Swaps go straight to cp-amm, so any r
 
 ## Share accounting
 
-`liquidity_per_share` is fixed when the vault is created:
+A share is a pro-rata claim on the vault's position liquidity, `L_vault`:
 
-- deposit `s` shares → add exactly `s × liquidity_per_share` liquidity to the vault's position
-- redeem `s` shares → remove exactly `s × liquidity_per_share` liquidity
+- deposit `s` shares → add `s × ceil(L_vault / supply)` liquidity
+- redeem `s` shares → remove `s × floor(L_vault / supply)` liquidity
+- single-token deposit adding `ΔL` → mint `ΔL × (1 − zap fee) / ceil(L_vault / supply)` shares
 
-Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the same, so every unit of liquidity, and therefore every share, is worth more tokens over time. This has three consequences:
+`liquidity_per_share` is only the launch ratio. It applies when the supply is zero.
 
-- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices deposits and withdrawals, rounding against the user.
-- **No donation or inflation attack.** Shares track liquidity units, not token balances. Tokens sent to the vault do not change what a share is worth.
-- **Invariant:** `position.unlocked_liquidity ≥ share_supply × liquidity_per_share`. The remainder is rounding dust from the seed.
+Two things make a share worth more stock over time:
+
+1. **Pool fees.** Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the same, so every unit of liquidity is backed by more tokens.
+2. **Vault fees.** The single-token deposit keeps 0.05% of the liquidity it adds in the position without minting shares for it, so `L_vault / supply` rises for existing holders.
+
+This has three consequences:
+
+- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices deposits and withdrawals. Every rounding favours the vault.
+- **No donation or inflation attack.** Only the vault can add liquidity to its position. Tokens sent to the vault do not change what a share is worth.
+- **Dust.** Redeeming a few raw share units can pay out zero of a token. cp-amm rejects that, so the transaction fails and the holder keeps the shares.
 
 ## Instructions
 
@@ -39,6 +47,7 @@ Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the sam
 |---|---|---|
 | `initialize_vault` | admin | Creates the pool via `initialize_customizable_pool` (compounding, full range, flat fee). The vault PDA is the pool creator, so it owns the first position NFT. |
 | `deposit(shares, max_a, max_b)` | anyone | Pulls up to `max_a`/`max_b` into vault-owned reserves, adds liquidity signed by the vault, refunds what cp-amm did not take, and mints `shares`. |
+| `deposit_single(input_is_a, amount_in, min_shares)` | anyone | Takes one issuer's token, swaps the right part of it on the pool at the pool's price, adds both as liquidity, refunds the dust, and mints shares net of the 0.05% vault fee. `min_shares` bounds slippage. |
 | `redeem(shares, min_a, min_b)` | holder | Burns shares, then removes liquidity straight to the holder in both tokens. Never paused by the vault. |
 | `harvest` | anyone | Claims the position fee to the treasury. In compounding pools that fee is in token B only. It is the protocol's cut. |
 | `set_deposits_paused` | admin | Circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open. |

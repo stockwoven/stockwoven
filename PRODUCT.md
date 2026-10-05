@@ -16,7 +16,7 @@ Several issuers tokenize the same stock, and each version trades in its own pool
 
 ## Positioning
 
-One stock, one token, with all issuers' liquidity in one Meteora DAMM v2 pool. No oracle: shares track liquidity units, and conversion fees compound into the pool, so each sw token is backed by more stock over time.
+One stock, one token, with all issuers' liquidity in one Meteora DAMM v2 pool. No oracle: shares are a pro-rata claim on the vault's pool liquidity, and conversion fees compound into the pool, so each sw token is backed by more stock over time.
 
 ## Operating Context
 
@@ -26,7 +26,7 @@ One stock, one token, with all issuers' liquidity in one Meteora DAMM v2 pool. N
 
 ## Capabilities and Constraints
 
-- Deposit and redeem swINTC (proportional deposits only), direct issuer-to-issuer conversion on DAMM v2, permissionless harvest of the protocol fee, test-token faucet, wallet activity history read from chain.
+- Deposit and redeem swINTC (single-token deposits in the program, not yet in the app), direct issuer-to-issuer conversion on DAMM v2, permissionless harvest of the protocol fee, test-token faucet, wallet activity history read from chain.
 - Fee split per 0.10% conversion: 64% compounds for holders, 16% treasury, 20% Meteora.
 - Redemptions are never paused by the vault; deposits can be paused by the admin.
 

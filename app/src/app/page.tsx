@@ -20,7 +20,7 @@ const STEPS = [
   { title: "Deposit", text: "Hand over the vault's current mix of both issuers' tokens. Receive swINTC." },
   {
     title: "Hold",
-    text: "Each swINTC is a fixed slice of the pool's liquidity. Its value is read from the pool account, not from an oracle.",
+    text: "Each swINTC is a pro-rata slice of the vault's liquidity in the pool. Its value is read from the pool account, not from an oracle.",
   },
   { title: "Redeem", text: "Burn swINTC and take your share of both tokens. The vault never pauses redemptions." },
 ];
@@ -48,7 +48,7 @@ const FAQ = [
   },
   {
     q: "Is there a price oracle?",
-    a: "No. Meteora's own pool math prices deposits and redemptions, rounding against the user. Shares track liquidity units, so tokens sent to the vault don't change what a share is worth.",
+    a: "No. Meteora's own pool math prices deposits and redemptions, rounding against the user. Only the vault can add liquidity to its position, so tokens sent to the vault don't change what a share is worth.",
     href: "/docs/how-the-vault-works#share-accounting",
   },
   {
@@ -63,8 +63,8 @@ const FAQ = [
   },
   {
     q: "Can I deposit only one issuer's token?",
-    a: "Not yet. Deposits are proportional: you add both tokens at the pool's current mix.",
-    href: "/docs/deposit#proportional-deposits-only",
+    a: "Yes. The vault swaps part of it on the Meteora pool and deposits both, for the conversion fee plus a 0.05% vault fee.",
+    href: "/docs/deposit#single-token-deposits",
   },
   {
     q: "Is this on mainnet?",

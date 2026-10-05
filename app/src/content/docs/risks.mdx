@@ -12,7 +12,7 @@ Pause, freeze and permanent delegate can still halt or drain the pool vaults; th
 
 ## No oracle, no donation attack
 
-Deposits and withdrawals are priced by cp-amm's own `L × reserve / L_total` rule, rounding against the user. Shares track liquidity units, not token balances, so tokens sent to the vault do not change what a share is worth.
+Deposits and withdrawals are priced by cp-amm's own `L × reserve / L_total` rule, rounding against the user. Only the vault can add liquidity to its position, so tokens sent to the vault do not change what a share is worth.
 
 ## Full range
 
