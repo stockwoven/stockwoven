@@ -1,5 +1,6 @@
-# Servidor Next.js do Stockwoven. Instale em /etc/systemd/system/stockwoven.service
-# (veja deploy/README.md) e use: systemctl status|restart|stop stockwoven
+# Servidor Next.js do Stockwoven. O ./deploy.sh instala em /etc/systemd/system/stockwoven.service
+# e copia o binário do Node para /opt/stockwoven/bin/node (funciona com Node do nvm).
+# Veja deploy/README.md. No dia a dia: systemctl status|restart|stop stockwoven
 
 [Unit]
 Description=Stockwoven (Next.js)
@@ -12,7 +13,7 @@ User=stockwoven
 Group=stockwoven
 WorkingDirectory=/var/www/stockwoven/current
 EnvironmentFile=/etc/stockwoven/stockwoven.env
-ExecStart=/usr/bin/node server.js
+ExecStart=/opt/stockwoven/bin/node server.js
 Restart=on-failure
 RestartSec=3
 

@@ -50,10 +50,22 @@ fail() { printf '\n!! %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || fail "run as root: sudo ./deploy.sh"
 [ -d "$APP" ] || fail "no app/ next to deploy.sh; run it from the repository"
-command -v node >/dev/null || fail "Node.js is missing (needs 20.9+; see deploy/README.md)"
+
+# Node may come from nvm, under someone's home: sudo's PATH doesn't see it, and neither can the
+# service user. Find it here; step 3 copies the binary to a path the service can run.
+find_node() {
+  command -v node && return
+  for home in "$HOME" /root ${SUDO_USER:+"$(getent passwd "$SUDO_USER" | cut -d: -f6)"}; do
+    ls -1d "$home"/.nvm/versions/node/*/bin 2>/dev/null
+  done | sort -V | tail -n 1 | sed 's|$|/node|'
+}
+NODE_BIN=$(find_node || true)
+[ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || fail "Node.js not found, in PATH or in ~/.nvm (needs 20.9+; see deploy/README.md)"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
 node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>20||(a===20&&b>=9)?0:1)' \
   || fail "Node.js $(node -v) is too old; needs 20.9+"
-command -v npm >/dev/null || fail "npm is missing"
+command -v npm >/dev/null || fail "npm is missing next to $NODE_BIN"
+RUNTIME=/opt/stockwoven/bin/node
 
 # ---------------------------------------------------------------- 1. setup
 say "setup"
@@ -134,7 +146,14 @@ cp -a .next/static "$RELEASE/.next/static"
 cp -a public "$RELEASE/public"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$RELEASE"
 
-PREVIOUS=$(readlink -f "$BASE/current" 2>/dev/null || true)
+# The service runs this copy of the Node binary (see deploy/stockwoven.service).
+REAL_NODE=$(readlink -f "$NODE_BIN")
+mkdir -p "$(dirname "$RUNTIME")"
+cmp -s "$REAL_NODE" "$RUNTIME" || install -m 755 "$REAL_NODE" "$RUNTIME"
+
+# Only a release that exists counts as one to go back to (none on the first deploy).
+PREVIOUS=$(readlink -e "$BASE/current" 2>/dev/null || true)
+case "$PREVIOUS" in "$BASE"/releases/*) ;; *) PREVIOUS="" ;; esac
 ln -sfn "$RELEASE" "$BASE/current.new" && mv -T "$BASE/current.new" "$BASE/current"
 systemctl restart "$SERVICE"
 
