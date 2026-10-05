@@ -63,7 +63,7 @@ const FAQ = [
   },
   {
     q: "Can I deposit only one issuer's token?",
-    a: "Yes. The vault swaps part of it on the Meteora pool and deposits both, for the conversion fee plus a 0.05% vault fee.",
+    a: "Yes. Part of it buys the other issuer's token, through USDC pools or the vault's own pool, whichever mints more swINTC. Then both go in.",
     href: "/docs/deposit#single-token-deposits",
   },
   {

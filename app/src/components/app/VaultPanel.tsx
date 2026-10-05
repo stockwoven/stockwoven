@@ -18,6 +18,7 @@ import {
   stockValue,
   toRaw,
 } from "@/lib/stockwoven";
+import { ROUTE_SLIPPAGE_BPS, USDC_ROUTE, quoteRoutedDeposit, routedDepositIxs } from "@/lib/usdcRoute";
 import { AmountField, isAmount } from "../AmountField";
 import { Button, Ticker } from "../ds";
 import { LearnMore } from "../LearnMore";
@@ -53,7 +54,12 @@ export function VaultPanel() {
 
   const raw = isAmount(amount) ? toRaw(amount, single ? inDecimals : SHARE_DECIMALS) : 0n;
   const quote = data && !single && raw > 0n ? quoteShares(data.pool, data.shareSupply, raw, deposit) : null;
-  const singleShares = data && single && raw > 0n ? quoteDepositSingle(data.pool, data.shareSupply, inputIsA, raw) : null;
+  const inPoolShares = data && single && raw > 0n ? quoteDepositSingle(data.pool, data.shareSupply, inputIsA, raw) : null;
+  const routed = data && single && raw > 0n ? quoteRoutedDeposit(data.pool, data.shareSupply, inputIsA, raw) : null;
+  // Whichever route mints more swINTC. Through the USDC pools, the vault's pool grows in both tokens.
+  const viaUsdc = !!routed && (inPoolShares === null || routed.shares >= inPoolShares);
+  const singleShares = viaUsdc ? routed.shares : inPoolShares;
+  const otherSymbol = inputIsA ? "mINTC" : "mINTCx";
 
   let problem: string | null = null;
   if (!isAmount(amount)) problem = "Enter a valid amount";
@@ -65,7 +71,9 @@ export function VaultPanel() {
 
   function submit() {
     if (!publicKey) return;
-    if (single) {
+    if (single && viaUsdc && USDC_ROUTE) {
+      send("Deposit", [...ensureAccountsIxs(publicKey), ...routedDepositIxs(publicKey, routed)], USDC_ROUTE.lookupTable);
+    } else if (single) {
       if (!singleShares) return;
       const minShares = (singleShares * (10_000n - SLIPPAGE_BPS)) / 10_000n;
       send("Deposit", [...ensureAccountsIxs(publicKey), depositSingleIx(publicKey, inputIsA, raw, minShares)]);
@@ -177,7 +185,7 @@ export function VaultPanel() {
         {single ? (
           <dl className="kv">
             <div>
-              <dt className="t-body">You receive about</dt>
+              <dt className="t-body">{viaUsdc ? "You receive" : "You receive about"}</dt>
               <dd className="t-data">
                 {singleShares ? (
                   <>
@@ -197,12 +205,18 @@ export function VaultPanel() {
               </dd>
             </div>
             <div>
-              <dt className="t-body">Vault fee</dt>
-              <dd className="t-data">{(ZAP_FEE_BPS / 100).toFixed(2)}% + conversion fee</dd>
+              <dt className="t-body">Route</dt>
+              <dd className="t-data">{viaUsdc ? `USDC pools → ${otherSymbol}` : "Vault's pool"}</dd>
+            </div>
+            <div>
+              <dt className="t-body">Fees</dt>
+              <dd className="t-data">
+                {viaUsdc ? "2 conversions, no vault fee" : `${(ZAP_FEE_BPS / 100).toFixed(2)}% + conversion fee`}
+              </dd>
             </div>
             <div>
               <dt className="t-body">Slippage limit</dt>
-              <dd className="t-data">{Number(SLIPPAGE_BPS) / 100}%</dd>
+              <dd className="t-data">{Number(viaUsdc ? ROUTE_SLIPPAGE_BPS : SLIPPAGE_BPS) / 100}%</dd>
             </div>
           </dl>
         ) : (
@@ -245,7 +259,9 @@ export function VaultPanel() {
           <span className="t-body muted">
             {!deposit
               ? "Always open."
-              : single
+              : single && viaUsdc
+                ? `Part of it buys ${otherSymbol} through USDC, then both go in at the pool's mix.`
+                : single
                 ? "The vault converts part of it on the pool, then deposits both."
                 : "Both issuers' tokens go in at the pool's current mix."}
           </span>{" "}

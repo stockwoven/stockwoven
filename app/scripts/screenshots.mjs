@@ -49,6 +49,13 @@ function positionData() {
   b.writeBigUInt64LE(vaultLiquidity >> 64n, 160);
   return b.toString("base64");
 }
+// A stock/USDC route pool: 200 shares of stock against 4,000 USDC.
+function routePoolData(stockDecimals) {
+  const b = Buffer.alloc(1112);
+  b.writeBigUInt64LE(200n * 10n ** BigInt(stockDecimals), 680);
+  b.writeBigUInt64LE(4_000_000_000n, 688);
+  return b.toString("base64");
+}
 function tokenAccount(amount) {
   const b = Buffer.alloc(165);
   b.writeBigUInt64LE(BigInt(amount), 64);
@@ -126,7 +133,12 @@ function rpc(method, params, opts) {
     case "getMultipleAccounts": {
       if (params[0][0] === DEVNET.pool) {
         const cpAmm = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
-        return ctx([account(poolData(), cpAmm), account(positionData(), cpAmm)]);
+        return ctx([
+          account(poolData(), cpAmm),
+          account(positionData(), cpAmm),
+          account(routePoolData(DEVNET.decimalsA), cpAmm),
+          account(routePoolData(DEVNET.decimalsB), cpAmm),
+        ]);
       }
       const [a, b, s] = opts.empty ? [10e8, 10e6, 0] : [8.75 * 1e8, 9.25 * 1e6, 12.345678 * 1e8];
       return ctx([account(tokenAccount(a)), account(tokenAccount(b)), account(tokenAccount(s))]);

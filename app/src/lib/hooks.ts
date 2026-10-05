@@ -2,7 +2,16 @@
 
 import { Buffer } from "buffer";
 import { useCallback, useEffect, useState } from "react";
-import { ComputeBudgetProgram, ParsedTransactionWithMeta, PublicKey, TokenBalance, Transaction, TransactionInstruction } from "@solana/web3.js";
+import {
+  ComputeBudgetProgram,
+  ParsedTransactionWithMeta,
+  PublicKey,
+  TokenBalance,
+  Transaction,
+  TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
+} from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PoolState, SHARE_DECIMALS, VAULT, ata, fetchPool } from "./stockwoven";
 
@@ -75,21 +84,33 @@ export function explainError(e: unknown) {
   return message;
 }
 
-/** Signs and confirms a transaction with the connected wallet, tracking its status. */
+/**
+ * Signs and confirms a transaction with the connected wallet, tracking its status. With a
+ * `lookupTable` it sends a v0 transaction, for instructions that touch too many accounts otherwise.
+ */
 export function useSend(onDone: () => void) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
   const [status, setStatus] = useState<TxStatus>(null);
 
   const send = useCallback(
-    async (label: string, ixs: TransactionInstruction[]) => {
+    async (label: string, ixs: TransactionInstruction[], lookupTable?: PublicKey) => {
       if (!publicKey) return;
       try {
         setStatus({ kind: "pending", text: `Approve the ${label.toLowerCase()} in your wallet.` });
-        const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }), ...ixs);
+        const instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }), ...ixs];
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        tx.recentBlockhash = blockhash;
-        tx.feePayer = publicKey;
+        let tx: Transaction | VersionedTransaction;
+        if (lookupTable) {
+          const table = (await connection.getAddressLookupTable(lookupTable)).value;
+          if (!table) throw new Error("address lookup table not found");
+          const message = new TransactionMessage({ payerKey: publicKey, recentBlockhash: blockhash, instructions });
+          tx = new VersionedTransaction(message.compileToV0Message([table]));
+        } else {
+          tx = new Transaction().add(...instructions);
+          tx.recentBlockhash = blockhash;
+          tx.feePayer = publicKey;
+        }
         const signature = await sendTransaction(tx, connection);
         setStatus({ kind: "pending", text: "Sent. Waiting for devnet to confirm it.", signature });
         const result = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");

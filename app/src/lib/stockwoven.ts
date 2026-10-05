@@ -121,37 +121,56 @@ export function harvestIx() {
   });
 }
 
-/** A direct DAMM v2 swap between the two issuers' tokens; the vault program is not involved. */
-export function swapIx(user: PublicKey, aToB: boolean, amountIn: bigint, minOut: bigint) {
-  const [input, output] = aToB
-    ? [ata(user, VAULT.mintA), ata(user, VAULT.mintB)]
-    : [ata(user, VAULT.mintB), ata(user, VAULT.mintA)];
+/** The accounts of any cp-amm pool a swap goes through. */
+export type DammPool = { pool: PublicKey; tokenAVault: PublicKey; tokenBVault: PublicKey; mintA: PublicKey; mintB: PublicKey };
+
+/** A swap on any cp-amm pool, from the user's `input` token account to `output`. */
+export function poolSwapIx(p: DammPool, user: PublicKey, input: PublicKey, output: PublicKey, amountIn: bigint, minOut: bigint) {
   return new TransactionInstruction({
     programId: CP_AMM,
     data: data(DISC.swap, amountIn, minOut),
     keys: [
-      r(DAMM_POOL_AUTHORITY), w(VAULT.pool), w(input), w(output), w(VAULT.tokenAVault), w(VAULT.tokenBVault),
-      r(VAULT.mintA), r(VAULT.mintB), r(user, true), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+      r(DAMM_POOL_AUTHORITY), w(p.pool), w(input), w(output), w(p.tokenAVault), w(p.tokenBVault),
+      r(p.mintA), r(p.mintB), r(user, true), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
       r(CP_AMM), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
     ],
   });
 }
 
-/** `vaultLiquidity` is the vault position's liquidity: every swINTC is a pro-rata claim on it. */
-export type PoolState = { liquidity: bigint; reserveA: bigint; reserveB: bigint; vaultLiquidity: bigint };
+/** A direct DAMM v2 swap between the two issuers' tokens; the vault program is not involved. */
+export function swapIx(user: PublicKey, aToB: boolean, amountIn: bigint, minOut: bigint) {
+  const [input, output] = aToB
+    ? [ata(user, VAULT.mintA), ata(user, VAULT.mintB)]
+    : [ata(user, VAULT.mintB), ata(user, VAULT.mintA)];
+  return poolSwapIx(VAULT, user, input, output, amountIn, minOut);
+}
+
+export type Reserves = { reserveA: bigint; reserveB: bigint };
+
+/**
+ * `vaultLiquidity` is the vault position's liquidity: every swINTC is a pro-rata claim on it.
+ * `routes` holds the stock/USDC pools of the routed single-token deposit, when they exist.
+ */
+export type PoolState = Reserves & {
+  liquidity: bigint;
+  vaultLiquidity: bigint;
+  routes?: { a: Reserves; b: Reserves };
+};
 
 const u128 = (d: Buffer, offset: number) => d.readBigUInt64LE(offset) + (d.readBigUInt64LE(offset + 8) << 64n);
+const reserves = (d: Buffer): Reserves => ({ reserveA: d.readBigUInt64LE(680), reserveB: d.readBigUInt64LE(688) });
 
-/** Reads cp-amm's Pool and the vault's Position (offsets include the 8-byte discriminator). */
+/** Reads cp-amm's Pool, the vault's Position and any USDC route pools (offsets include the 8-byte discriminator). */
 export async function fetchPool(conn: Connection): Promise<PoolState> {
-  const [pool, position] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position]);
+  const routePools = devnet.usdcRoutes ? [devnet.usdcRoutes.a.pool, devnet.usdcRoutes.b.pool].map((k) => new PublicKey(k)) : [];
+  const [pool, position, routeA, routeB] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position, ...routePools]);
   if (!pool || !position) throw new Error("pool not found");
   const d = Buffer.from(pool.data);
   return {
     liquidity: u128(d, 360),
-    reserveA: d.readBigUInt64LE(680),
-    reserveB: d.readBigUInt64LE(688),
+    ...reserves(d),
     vaultLiquidity: u128(Buffer.from(position.data), 152),
+    routes: routeA && routeB ? { a: reserves(Buffer.from(routeA.data)), b: reserves(Buffer.from(routeB.data)) } : undefined,
   };
 }
 
@@ -178,8 +197,18 @@ export function quoteShares(pool: PoolState, supply: bigint, shares: bigint, rou
   return { a: div(dl * pool.reserveA, pool.liquidity), b: div(dl * pool.reserveB, pool.liquidity) };
 }
 
-/** x·y = k quote. Compounding pools charge the fee in token B: on output for A→B, on input for B→A. */
-export function quoteSwap(pool: PoolState, aToB: boolean, amountIn: bigint) {
+/** Most shares a deposit of at most `a` and `b` covers, at the vault pool's current reserves. */
+export function sharesFor(pool: PoolState, supply: bigint, a: bigint, b: bigint) {
+  const dlA = (a * pool.liquidity) / pool.reserveA;
+  const dlB = (b * pool.liquidity) / pool.reserveB;
+  return (dlA < dlB ? dlA : dlB) / liquidityPerShare(pool, supply, true);
+}
+
+/**
+ * x·y = k quote on any compounding cp-amm pool with TRADE_FEE_BPS. The fee is charged in token B:
+ * on output for A→B, on input for B→A.
+ */
+export function quoteSwap(pool: Reserves, aToB: boolean, amountIn: bigint) {
   const fee = (x: bigint) => (x * BigInt(TRADE_FEE_BPS)) / 10_000n;
   if (aToB) {
     const gross = (pool.reserveB * amountIn) / (pool.reserveA + amountIn);

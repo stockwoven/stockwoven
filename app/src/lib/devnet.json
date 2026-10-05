@@ -15,5 +15,20 @@
   "reserveA": "6LMPkTum1qwWYtVHVz5GWT8JnUwYHGuQPgb7CL5M2NBG",
   "reserveB": "FWVVbQBEC5ddf7yWoVe8YM97wfJj6T6pgVCtoDMRPRQj",
   "treasury": "3Kbce1j9DpDzM4fGS3qSJZeqX8ixjUPXVxfcJpRSdJ4n",
-  "liquidityPerShare": "922337203685477580"
+  "liquidityPerShare": "922337203685477580",
+  "usdcMint": "5xzRhDT2jdyJ1WbwnyBdj8Gjb5JbNrD3G3w89b7Qeahz",
+  "usdcDecimals": 6,
+  "usdcRoutes": {
+    "a": {
+      "pool": "8Hv5gKY1AtLGJjcQL4YGECoSJdmaiuhB4wd6VdkKVncz",
+      "stockVault": "3z2wvoSntVveNkmjdT127SxKYdwhJXFHMF2uAP7Gg1EA",
+      "usdcVault": "8WAfxU9SsSS3qqLSqxquTagbDLiiKyUnLM5ggd47Wt2v"
+    },
+    "b": {
+      "pool": "Fumx8o5o411ikPBjBwLwqduY3mi9qzZ5YJw5TSgLje9q",
+      "stockVault": "FkZwo4e5UgU5ZmAZvCuTCVGKVpMfCm2fA4RsfeU6gtoN",
+      "usdcVault": "84bcHohhWNcGxCgJ3jtAc1734ZBAZbBvTuKgXmGefiZU"
+    }
+  },
+  "lookupTable": "5wvk9BrKeYEV13ExtaLM24Nbacvm67TW3jL1Kp9QBarf"
 }

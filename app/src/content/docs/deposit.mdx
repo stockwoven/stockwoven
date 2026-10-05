@@ -12,9 +12,21 @@ You choose how much swINTC to receive. Each share adds its pro-rata slice of the
 
 ## Single-token deposits
 
-You can also deposit just one issuer's token. The vault swaps the right part of it on the Meteora pool, at the pool's price, adds both tokens as liquidity and refunds the dust in the same transaction.
+You can also deposit just one issuer's token. Part of it has to become the other issuer's token first, and there are two routes for that. The app quotes both and takes the one that mints more swINTC.
 
-A single-token deposit costs a little more than a proportional one:
+### Through USDC pools
+
+Part of your token is sold for USDC in its stock/USDC pool, and the USDC buys the other issuer's token in that one's stock/USDC pool. Both then go into the vault at the pool's mix, as a normal deposit. The vault's pool grows in both tokens.
+
+It costs the two conversions' fees, with no vault fee. Each conversion must fill within 0.1% of its quote, or the whole transaction fails. Whatever the deposit does not take stays in your wallet, including a little USDC.
+
+On devnet the route uses a test USDC and two pools priced at 20 USDC per share.
+
+### Through the vault's pool
+
+The vault swaps the right part of your token on its own Meteora pool, at the pool's price, adds both tokens as liquidity and refunds the dust in the same transaction. The token you bring is the only one the pool gains: the other one leaves in the swap and comes back in the deposit.
+
+This route costs:
 
 - the pool's conversion fee on the part that is swapped,
 - price impact from that swap,
@@ -22,11 +34,13 @@ A single-token deposit costs a little more than a proportional one:
 
 In tests, a single-token deposit of 0.1% of the pool gets back 99.74% on an immediate redeem. You set a minimum amount of swINTC to receive. If the pool moves past it, the transaction fails.
 
+When the vault's pool is short of the token you bring, it pays more for it, so this route can mint more swINTC. Such a deposit also pulls the pool back toward one-to-one.
+
 ## Slippage limit
 
 The app allows up to 0.5% more of each token than the quote. Whatever cp-amm does not take is refunded in the same transaction.
 
-For a single-token deposit, the app asks for at least 99.5% of the quoted swINTC.
+For a single-token deposit through the vault's pool, the app asks for at least 99.5% of the quoted swINTC.
 
 ## When deposits are paused
 
