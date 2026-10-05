@@ -20,4 +20,8 @@ pub enum ErrorCode {
     InvalidPool,
     #[msg("Math overflow")]
     MathOverflow,
+    #[msg("Account is not the expected cp-amm pool or position")]
+    InvalidDammAccount,
+    #[msg("The deposit would mint fewer shares than the minimum")]
+    SlippageExceeded,
 }

@@ -1,7 +1,9 @@
 pub mod constants;
+pub mod damm;
 pub mod error;
 pub mod events;
 pub mod instructions;
+pub mod math;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -28,9 +30,20 @@ pub mod stockwoven {
         crate::instructions::initialize_vault::handle_initialize_vault(ctx, args)
     }
 
-    /// Adds `shares * liquidity_per_share` liquidity to the vault's position and mints `shares`.
+    /// Adds the liquidity behind `shares` (both tokens, at the pool's ratio) and mints `shares`.
     pub fn deposit(ctx: Context<Deposit>, shares: u64, max_a: u64, max_b: u64) -> Result<()> {
         crate::instructions::deposit::handle_deposit(ctx, shares, max_a, max_b)
+    }
+
+    /// Deposits one issuer's token: swaps part of it on the pool, adds both as liquidity, and
+    /// mints shares net of the vault's zap fee. `min_shares` bounds slippage.
+    pub fn deposit_single(
+        ctx: Context<DepositSingle>,
+        input_is_a: bool,
+        amount_in: u64,
+        min_shares: u64,
+    ) -> Result<()> {
+        crate::instructions::deposit_single::handle_deposit_single(ctx, input_is_a, amount_in, min_shares)
     }
 
     /// Burns `shares` and pays out the matching liquidity in both tokens, in kind.

@@ -6,8 +6,10 @@ use anchor_spl::token_interface::{
 use crate::{
     constants::*,
     cp_amm::{self, types::AddLiquidityParameters},
+    damm,
     error::ErrorCode,
     events::Deposited,
+    math,
     state::Vault,
 };
 
@@ -80,20 +82,23 @@ pub struct Deposit<'info> {
     pub share_token_program: Interface<'info, TokenInterface>,
 }
 
-/// Pulls up to `max_a`/`max_b` into the vault's reserves, adds exactly
-/// `shares * liquidity_per_share` liquidity (cp-amm takes tokens at the pool's current reserve
-/// ratio), refunds whatever cp-amm did not take, and mints `shares`.
+/// Pulls up to `max_a`/`max_b` into the vault's reserves, adds the liquidity behind `shares`
+/// (rounded up; cp-amm takes tokens at the pool's current reserve ratio), refunds whatever
+/// cp-amm did not take, and mints `shares`.
 pub fn handle_deposit(ctx: Context<Deposit>, shares: u64, max_a: u64, max_b: u64) -> Result<()> {
     require!(!ctx.accounts.vault.deposits_paused, ErrorCode::DepositsPaused);
     require!(shares > 0, ErrorCode::ZeroAmount);
 
-    let liquidity_delta = ctx
-        .accounts
-        .vault
-        .shares_to_liquidity(shares)
-        .ok_or(ErrorCode::MathOverflow)?;
-
     let accounts = &ctx.accounts;
+    let liquidity_delta = math::liquidity_for_shares(
+        shares,
+        damm::position_liquidity(&accounts.position)?,
+        accounts.share_mint.supply,
+        accounts.vault.liquidity_per_share,
+        true,
+    )
+    .ok_or(ErrorCode::MathOverflow)?;
+
     let reserve_a_before = accounts.reserve_a.amount;
     let reserve_b_before = accounts.reserve_b.amount;
 
@@ -191,7 +196,7 @@ pub fn handle_deposit(ctx: Context<Deposit>, shares: u64, max_a: u64, max_b: u64
     Ok(())
 }
 
-fn transfer_in<'info>(
+pub(crate) fn transfer_in<'info>(
     token_program: &Interface<'info, TokenInterface>,
     from: &InterfaceAccount<'info, TokenAccount>,
     mint: &InterfaceAccount<'info, Mint>,
@@ -217,7 +222,7 @@ fn transfer_in<'info>(
     )
 }
 
-fn refund<'info>(
+pub(crate) fn refund<'info>(
     token_program: &Interface<'info, TokenInterface>,
     reserve: &InterfaceAccount<'info, TokenAccount>,
     mint: &InterfaceAccount<'info, Mint>,

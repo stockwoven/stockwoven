@@ -4,8 +4,10 @@ use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TokenInterface
 use crate::{
     constants::*,
     cp_amm::{self, types::RemoveLiquidityParameters},
+    damm,
     error::ErrorCode,
     events::Redeemed,
+    math,
     state::Vault,
 };
 
@@ -74,16 +76,20 @@ pub struct Redeem<'info> {
     pub share_token_program: Interface<'info, TokenInterface>,
 }
 
-/// Burns `shares` and removes `shares * liquidity_per_share` liquidity straight to the user,
+/// Burns `shares` and removes their pro-rata liquidity (rounded down) straight to the user,
 /// in both tokens at the pool's reserve ratio. Never paused by the vault: holders can always
 /// leave in kind (an issuer pausing its own token still blocks that token's transfers).
 pub fn handle_redeem(ctx: Context<Redeem>, shares: u64, min_a: u64, min_b: u64) -> Result<()> {
     require!(shares > 0, ErrorCode::ZeroAmount);
     let accounts = &ctx.accounts;
-    let liquidity_delta = accounts
-        .vault
-        .shares_to_liquidity(shares)
-        .ok_or(ErrorCode::MathOverflow)?;
+    let liquidity_delta = math::liquidity_for_shares(
+        shares,
+        damm::position_liquidity(&accounts.position)?,
+        accounts.share_mint.supply,
+        accounts.vault.liquidity_per_share,
+        false,
+    )
+    .ok_or(ErrorCode::MathOverflow)?;
 
     token_interface::burn(
         CpiContext::new(

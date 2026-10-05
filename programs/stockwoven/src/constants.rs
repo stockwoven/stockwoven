@@ -39,3 +39,8 @@ pub const DAMM_POOL_AUTHORITY: Pubkey = pubkey!("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B
 pub const DAMM_EVENT_AUTHORITY: Pubkey = pubkey!("3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwptYGjHfet");
 
 pub const DAMM_CUSTOMIZABLE_POOL_SEED: &[u8] = b"cpool";
+
+/// Vault fee on single-token deposits, in basis points of the liquidity added. It stays in the
+/// position without minting shares, so it accrues to existing holders.
+#[constant]
+pub const ZAP_FEE_BPS: u16 = 5;

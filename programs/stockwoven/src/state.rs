@@ -1,11 +1,11 @@
 use anchor_lang::prelude::*;
 
 /// One vault per stock. It owns a single DAMM v2 position in the cross-issuer pool, and each
-/// share (swINTC) is a claim on a fixed amount of that position's liquidity.
+/// share (swINTC) is a pro-rata claim on that position's liquidity.
 ///
-/// Compounding fees raise the reserves behind every unit of liquidity, so a share is worth more
-/// stock over time while `liquidity_per_share` never changes. Invariant:
-/// `position.unlocked_liquidity >= share_supply * liquidity_per_share`.
+/// Two things make a share worth more stock over time:
+/// - the pool's compounding fees raise the reserves behind every unit of liquidity;
+/// - the vault's own zap fee adds liquidity to the position without minting shares.
 #[account]
 #[derive(InitSpace)]
 pub struct Vault {
@@ -22,13 +22,8 @@ pub struct Vault {
     pub reserve_a: Pubkey,
     pub reserve_b: Pubkey,
     pub share_mint: Pubkey,
+    /// Liquidity per raw share unit at launch; used again only if the share supply returns to 0.
     pub liquidity_per_share: u128,
     pub deposits_paused: bool,
     pub bump: u8,
-}
-
-impl Vault {
-    pub fn shares_to_liquidity(&self, shares: u64) -> Option<u128> {
-        (shares as u128).checked_mul(self.liquidity_per_share)
-    }
 }

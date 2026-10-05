@@ -18,6 +18,18 @@ pub struct Deposited {
 }
 
 #[event]
+pub struct DepositedSingle {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+    pub input_is_a: bool,
+    pub amount_in: u64,
+    pub swapped: u64,
+    pub shares: u64,
+    pub refund_a: u64,
+    pub refund_b: u64,
+}
+
+#[event]
 pub struct Redeemed {
     pub vault: Pubkey,
     pub user: Pubkey,

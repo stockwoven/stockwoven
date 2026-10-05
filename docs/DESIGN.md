@@ -27,24 +27,33 @@ fill them.
 
 ## Share accounting
 
-`liquidity_per_share` is fixed when the vault is created:
+A share is a pro-rata claim on the vault's position liquidity, `L_vault`:
 
-- deposit `s` shares → add exactly `s × liquidity_per_share` liquidity to the vault's position
-- redeem `s` shares → remove exactly `s × liquidity_per_share` liquidity
+- deposit `s` shares → add `s × ceil(L_vault / supply)` liquidity
+- redeem `s` shares → remove `s × floor(L_vault / supply)` liquidity
+- single-token deposit adding `ΔL` → mint `ΔL × (1 − zap fee) / ceil(L_vault / supply)` shares
 
-Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the same, so every unit
-of liquidity, and therefore every share, is worth more tokens over time. This has three
-consequences:
+`liquidity_per_share` is only the launch ratio. It applies when the supply is zero.
+
+Two things make a share worth more stock over time:
+
+1. **Pool fees.** Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the
+   same, so every unit of liquidity is backed by more tokens.
+2. **Vault fees.** The single-token deposit keeps `ZAP_FEE_BPS` (0.05%) of the liquidity it adds
+   in the position without minting shares for it, so `L_vault / supply` rises for existing
+   holders.
+
+This design has three consequences:
 
 - **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices deposits
-  and withdrawals, rounding against the user.
-- **No donation or inflation attack.** Shares track liquidity units, not token balances.
-  Tokens sent to the vault do not change what a share is worth.
-- **Invariant:** `position.unlocked_liquidity ≥ share_supply × liquidity_per_share`. The
-  remainder is rounding dust from the seed.
+  and withdrawals. Every rounding favours the vault.
+- **No donation or inflation attack.** Only the vault can add liquidity to its position. Tokens
+  sent to the vault do not change what a share is worth.
+- **Dust.** Redeeming a few raw share units can pay out zero of a token. cp-amm rejects that
+  (`AmountIsZero`), so the transaction fails and the holder keeps the shares.
 
 The value of one share, which the app shows, is:
-`liquidity_per_share × (token_a_amount / 10^dec_a + token_b_amount / 10^dec_b) / pool.liquidity`,
+`(L_vault / supply) × (token_a_amount / 10^dec_a + token_b_amount / 10^dec_b) / pool.liquidity`,
 counting one token of either issuer as one share of stock.
 
 ## Instructions
@@ -53,6 +62,7 @@ counting one token of either issuer as one share of stock.
 |---|---|---|
 | `initialize_vault` | admin | Creates the pool via `initialize_customizable_pool` (compounding, full range, flat fee). The vault PDA is the pool creator, so it owns the first position NFT. The admin supplies the seed tokens and receives `(L − dead) / liquidity_per_share` shares. Also creates the share mint, two reserve token accounts, and the admin's share ATA. |
 | `deposit(shares, max_a, max_b)` | anyone | Pulls up to `max_a`/`max_b` into vault-owned reserves, CPIs `add_liquidity` signed by the vault, refunds what cp-amm did not take, and mints `shares`. |
+| `deposit_single(input_is_a, amount_in, min_shares)` | anyone | Takes one issuer's token, swaps `sqrt(r × (r + a)) − r` of it on the pool (at the pool's price, never an assumed 1:1), adds both as liquidity, refunds the dust, and mints shares net of the 0.05% vault fee. `min_shares` bounds slippage. |
 | `redeem(shares, min_a, min_b)` | holder | Burns shares, then CPIs `remove_liquidity` straight to the holder in both tokens. Never paused by the vault. |
 | `harvest` | anyone | CPIs `claim_position_fee` to the treasury. In compounding pools that fee is in token B only. It is the protocol's cut. |
 | `set_deposits_paused` | admin | Circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open. |
@@ -70,8 +80,7 @@ With `trade_fee_bps = 10` and `compounding_fee_bps = 8000`, a 0.10% conversion f
 
 ## Decisions and limits
 
-- **Proportional deposits only.** cp-amm's compounding mode has no single-sided add. A
-  single-token "zap" (swap half, then deposit) belongs in the client or a later instruction.
+- **Single-token deposits pay the swap fee** on the swapped part, plus price impact and the vault fee. In tests, a deposit of 0.1% of the pool gets back 99.74% on an immediate redeem.
 - **One customizable pool per mint pair, ever** (cp-amm seeds `["cpool", max, min]`). On mainnet,
   check that nobody created INTCx/INTC first, and choose token A/B on purpose: fees accrue in B.
 - **Token-2022 issuer tokens** need Meteora token badges, which INTCx and Backpack INTC already
@@ -88,12 +97,12 @@ With `trade_fee_bps = 10` and `compounding_fee_bps = 8000`, a 0.10% conversion f
 `programs/stockwoven/tests/test_vault.rs` runs in LiteSVM against the real cp-amm binary
 (`scripts/fetch-fixtures.sh` dumps it from mainnet). It covers:
 
-- pool creation,
-- deposit with refund,
-- 40 direct swaps,
-- harvest to the treasury,
-- redeeming more stock than was deposited,
-- pause behaviour.
+- pool creation, with plain SPL tokens and with Token-2022 issuer tokens (a permanent delegate, like xStocks and Backpack), with and without token badges,
+- deposit with refund, and single-token deposits from either issuer,
+- 40 direct swaps, harvest to the treasury, and redeeming more stock than was deposited,
+- rounding across several holders, dust redeems, slippage limits and pause behaviour.
+
+Unit tests cover the integer math in `src/math.rs`.
 
 ```
 scripts/fetch-fixtures.sh            # once
