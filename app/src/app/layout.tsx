@@ -1,23 +1,30 @@
-import type { Metadata } from "next";
-import { IBM_Plex_Sans, JetBrains_Mono, Space_Grotesk } from "next/font/google";
-import { Providers } from "./providers";
+import type { Metadata, Viewport } from "next";
+import "@/design-system/stockwoven-design-system/css/fonts.css";
+import "@/design-system/stockwoven-design-system/css/tokens.css";
+import "@/design-system/stockwoven-design-system/css/components.css";
 import "./globals.css";
-
-const display = Space_Grotesk({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-display" });
-const body = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "600"], variable: "--font-body" });
-const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["500"], variable: "--font-mono" });
+import { colorToken } from "@/lib/tokens";
 
 export const metadata: Metadata = {
   title: "Stockwoven",
-  description: "One stock, one token. A yield-bearing vault over a Meteora DAMM v2 cross-issuer pool.",
+  description: "One stock. One token. The Stockwoven vault on Solana devnet, over a Meteora DAMM v2 cross-issuer pool.",
+  icons: {
+    icon: [
+      { url: "/icons/icon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: { url: "/icons/apple-touch-icon.png", sizes: "180x180" },
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: colorToken("brand-ivory"),
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body>
-        <Providers>{children}</Providers>
-      </body>
+    <html lang="en">
+      <body>{children}</body>
     </html>
   );
 }

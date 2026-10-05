@@ -1,0 +1,21 @@
+# Fees.
+
+Conversions between issuers pay fees, and DAMM v2's compounding mode puts most of each fee back into the pool.
+
+## Where each conversion fee goes
+
+With `trade_fee_bps = 10` and `compounding_fee_bps = 8000`, a 0.10% conversion fee splits into:
+
+- 20% to Meteora (fixed by cp-amm),
+- 64% compounded for swINTC holders,
+- 16% to the Stockwoven treasury.
+
+## Conversions
+
+A direct swap on the Meteora DAMM v2 pool, the same route Jupiter would take. Most of the fee stays in the pool and raises the value of every swINTC. Compounding pools charge the fee in token B: on the output for mINTCx → mINTC, on the input for mINTC → mINTCx.
+
+The app's Convert tab uses a 1% slippage limit.
+
+## Harvest
+
+Anyone can sweep the non-compounding part of the fee to the treasury. The holders' share never leaves the pool. In compounding pools that fee is in token B only. It is the protocol's cut.

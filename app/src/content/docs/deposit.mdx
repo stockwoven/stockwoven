@@ -1,0 +1,29 @@
+import { Todo } from "@/components/docs/Todo";
+
+# Deposit.
+
+Hand over the vault's current mix of mINTCx and mINTC. Receive swINTC.
+
+## How a deposit is priced
+
+Both issuers' tokens go in at the pool's current mix. No price oracle: everyone adds liquidity at the same ratio.
+
+You choose how much swINTC to receive. Each share adds exactly `liquidity_per_share` liquidity to the vault's position, and cp-amm takes the matching amount of each token, rounding up against the depositor.
+
+## Proportional deposits only
+
+cp-amm's compounding mode has no single-sided add. A single-token "zap" (swap half, then deposit) belongs in the client or a later instruction.
+
+## Slippage limit
+
+The app allows up to 0.5% more of each token than the quote. Whatever cp-amm does not take is refunded in the same transaction.
+
+## When deposits are paused
+
+The admin can pause deposits as a circuit breaker for issuer events (pause, freeze, depeg). A deposit then fails with "Deposits are paused". Redemptions stay open.
+
+## Test tokens
+
+On devnet, the faucet in the app's Devnet tab sends 10 mINTCx, 10 mINTC and a little devnet SOL for fees, once a minute per wallet.
+
+<Todo>Mainnet deposit requirements (supported issuer tokens, minimums) are not decided yet.</Todo>

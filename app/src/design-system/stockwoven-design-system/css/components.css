@@ -1,0 +1,39 @@
+/* Stockwoven components. Everything reads the tokens from tokens.css. */
+.sw-root{background:var(--bg);color:var(--text);font-family:var(--font-sans);padding:var(--space-6);display:flex;flex-wrap:wrap;gap:var(--space-4);align-items:center}
+
+/* Logo */
+.sw-mark{display:inline-block;flex:none}
+.sw-mark svg{display:block;width:100%;height:100%}
+.sw-lockup{display:inline-flex;align-items:center;gap:.2em;font-family:var(--font-display);font-weight:700;letter-spacing:-.045em;line-height:.9;color:var(--text)}
+.sw-lockup .sw-mark{width:1em;height:1em}
+
+/* Button */
+.sw-btn{font-family:var(--font-sans);font-weight:700;font-size:14px;line-height:1.3;border:0;border-radius:var(--radius-md);padding:12px 20px;cursor:pointer;display:inline-flex;align-items:center;gap:var(--space-2);white-space:nowrap}
+.sw-btn--primary{background:var(--accent);color:var(--on-purple)}
+.sw-btn--secondary{background:var(--surface-inverse);color:var(--text-inverse)}
+.sw-btn--ghost{background:transparent;color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
+.sw-btn:focus-visible{outline:2px solid var(--accent-text);outline-offset:3px}
+.sw-btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* Powered by badge */
+.sw-powered{display:inline-flex;align-items:center;gap:var(--space-2);font-family:var(--font-sans);font-size:13px;font-weight:400;color:var(--text-subtle)}
+.sw-powered b{font-weight:700;color:var(--text)}
+.sw-powered .sw-mark{width:18px;height:18px}
+
+/* Ticker chip */
+.sw-chip{display:inline-flex;align-items:center;font-family:var(--font-mono);font-size:14px;line-height:1;padding:7px 12px;border-radius:var(--radius-pill);box-shadow:inset 0 0 0 1px var(--line);color:var(--text);background:var(--surface)}
+.sw-chip .sw-prefix{color:var(--accent-text)}
+
+/* Stat card */
+.sw-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);padding:var(--space-6);display:flex;flex-direction:column;gap:var(--space-2);min-width:200px}
+.sw-stat--inverse{background:var(--surface-inverse);border-color:var(--surface-inverse)}
+.sw-stat__value{font-family:var(--font-display);font-weight:700;font-size:56px;line-height:1;letter-spacing:-.04em;color:var(--text)}
+.sw-stat--inverse .sw-stat__value{color:var(--accent)}
+.sw-stat__label{font-size:15px;color:var(--text-body)}
+.sw-stat--inverse .sw-stat__label{color:var(--text-inverse)}
+.sw-stat__source{font-family:var(--font-mono);font-size:12px;color:var(--text-subtle)}
+.sw-stat--inverse .sw-stat__source{color:var(--text-inverse);opacity:.7}
+
+/* Pattern */
+.sw-weave{position:relative;overflow:hidden;border-radius:var(--radius-lg);background:var(--brand-ink)}
+.sw-weave canvas{position:absolute;inset:0;width:100%;height:100%;display:block}

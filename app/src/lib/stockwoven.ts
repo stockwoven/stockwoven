@@ -172,3 +172,12 @@ export const fromRaw = (raw: bigint, decimals: number, digits = 4) =>
 
 export const explorer = (address: PublicKey | string, kind: "address" | "tx" = "address") =>
   `https://explorer.solana.com/${kind}/${address.toString()}?cluster=devnet`;
+
+export const shortAddress = (address: PublicKey | string) => {
+  const s = address.toString();
+  return `${s.slice(0, 4)}…${s.slice(-4)}`;
+};
+
+/** Signed figure with a true minus sign, for balance changes. */
+export const signed = (value: number, digits = 4) =>
+  `${value > 0 ? "+" : "−"}${Math.abs(value).toLocaleString("en-US", { maximumFractionDigits: digits })}`;

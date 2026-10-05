@@ -1,0 +1,37 @@
+# Glossary.
+
+## sw token
+
+The vault's token for one stock: the stock ticker with the lowercase `sw` prefix, such as `swINTC`. A pro-rata claim on the vault's liquidity.
+
+## Issuer
+
+A company that tokenizes a stock. Several issuers can tokenize the same stock; each version trades in its own pool.
+
+## mINTCx and mINTC
+
+Devnet test tokens that stand in for INTCx from xStocks and INTC from Backpack.
+
+## DAMM v2
+
+Meteora's constant-product AMM (cp-amm). The vault's liquidity sits in one DAMM v2 pool per stock.
+
+## Compounding fee
+
+The part of each conversion fee that DAMM v2 adds back to the pool's reserves. It raises the value of every sw token.
+
+## Liquidity per share
+
+The fixed amount of pool liquidity behind one share, set when the vault is created.
+
+## Harvest
+
+Sweeping the non-compounding part of the fee to the treasury. Anyone can call it.
+
+## Treasury
+
+The account that receives the protocol's cut of conversion fees.
+
+## Slippage limit
+
+The most a quote may move before the transaction fails: 0.5% for deposits and redemptions, 1% for conversions in the app.

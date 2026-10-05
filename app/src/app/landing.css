@@ -1,0 +1,64 @@
+/* Landing: sells, never operates. */
+
+.island {
+  min-height: 160px;
+  justify-content: space-between;
+}
+
+.asset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.asset-chips li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  min-width: 160px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.steps + .sw-btn {
+  margin-top: var(--space-6);
+}
+
+.partners {
+  gap: var(--space-4);
+}
+
+.partner-sample {
+  justify-content: center;
+}
+
+.partner-sample__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.partner-sample__badge {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+
+.cta {
+  position: relative;
+  overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+  .cta__inner {
+    min-height: 420px;
+  }
+}

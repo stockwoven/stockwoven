@@ -2,8 +2,7 @@
 
 import { ReactNode } from "react";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import "@solana/wallet-adapter-react-ui/styles.css";
+import { WalletPickerProvider } from "@/components/WalletPicker";
 
 const RPC = process.env.NEXT_PUBLIC_RPC_URL ?? "https://api.devnet.solana.com";
 
@@ -13,7 +12,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <ConnectionProvider endpoint={RPC}>
       <WalletProvider wallets={[]} autoConnect>
-        <WalletModalProvider>{children}</WalletModalProvider>
+        <WalletPickerProvider>{children}</WalletPickerProvider>
       </WalletProvider>
     </ConnectionProvider>
   );

@@ -1,0 +1,29 @@
+import { PoweredBy } from "@/components/ds";
+import { Todo } from "@/components/docs/Todo";
+
+# For partners.
+
+Inside a neobank's app, the neobank's brand leads. Stockwoven stays small and consistent.
+
+## Integration
+
+The vault program is open: deposit and redeem are plain Solana instructions, and conversions go straight to the Meteora pool, so any router can fill them. The account order is in the app's client (`app/src/lib/stockwoven.ts`).
+
+<Todo>Integration guide, SDK and support contact are not published yet.</Todo>
+
+## The Powered by badge
+
+<div className="doc-badge"><PoweredBy /></div>
+
+- The symbol plus "Powered by Stockwoven". Place it once per flow, at the bottom of the investment screen or in the asset detail, never in the app's header or tab bar.
+- Badge colors follow the partner's screen: ink version on light screens, ivory version on dark screens. Never recolor the symbol to the partner's color; if the badge must disappear into the partner's palette, use the one-color gray version.
+
+## Tickers
+
+Tickers keep the `sw` prefix in the partner app (`swAAPL`). The partner can style the chip in its own colors; the prefix and the monospaced face stay.
+
+## Joint materials
+
+Partner first, Stockwoven second: "[Partner] × Stockwoven", the partner's logo on the left, a 1px divider, Stockwoven's lockup on the right at the same height as the partner's logo.
+
+Don't put the purple, the pattern or the full lockup inside a partner's product without their brand team's approval.

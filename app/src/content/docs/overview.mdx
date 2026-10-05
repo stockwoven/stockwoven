@@ -1,0 +1,35 @@
+import { Contracts } from "@/components/docs/Contracts";
+
+# Overview.
+
+One stock. One token.
+
+Stockwoven is infrastructure on Solana. The same stock is tokenized by several issuers, and each version trades in its own pool. Stockwoven's vault takes every issuer's version in and gives back one yield-bearing token per stock, with all the liquidity in one place.
+
+## Who it is for
+
+Stockwoven is offered mainly to neobanks and fintechs that want to give their customers tokenized stocks. The neobank owns the customer and the app; Stockwoven is the layer underneath.
+
+## The three steps
+
+- **Deposit.** Hand over the vault's current mix of mINTCx and mINTC. Receive swINTC.
+- **Hold.** Each swINTC is a fixed slice of the pool's liquidity. Its value is read from the pool account, not from an oracle.
+- **Redeem.** Burn swINTC and take your share of both tokens. The vault never pauses redemptions.
+
+Each step has its own page: [Deposit](/docs/deposit), [Hold](/docs/hold), [Redeem](/docs/redeem).
+
+## What runs today
+
+One vault on Solana devnet: swINTC, over a Meteora DAMM v2 pool that pairs two issuers' Intel tokens. Built on Meteora DAMM v2 with compounding fees. Test tokens stand in for INTCx from xStocks and INTC from Backpack.
+
+Solana devnet only. Nothing here uses real funds.
+
+## Live figures
+
+The app reads its figures straight from the Meteora pool and the swINTC mint on devnet, every ten seconds. Nothing is cached or estimated.
+
+## Contracts
+
+Devnet accounts, with links to Solana Explorer.
+
+<Contracts />

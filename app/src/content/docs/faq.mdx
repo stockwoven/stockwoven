@@ -1,0 +1,25 @@
+import { Todo } from "@/components/docs/Todo";
+
+# FAQ.
+
+## Where does swINTC's growth come from?
+
+From conversions between issuers. Every conversion through the Meteora pool leaves a fee in its reserves, so each swINTC is backed by a little more stock. See [Fees](/docs/fees).
+
+## Is there a price oracle?
+
+No. cp-amm's own `L × reserve / L_total` rule prices deposits and withdrawals. See [How the vault works](/docs/how-the-vault-works#share-accounting).
+
+## Can redemptions be paused?
+
+No. The vault can pause deposits, never redemptions. Issuer powers are a separate risk: see [Risks & protections](/docs/risks).
+
+## Can I deposit only one issuer's token?
+
+Not yet. Deposits are proportional. See [Deposit](/docs/deposit#proportional-deposits-only).
+
+## Is this on mainnet?
+
+No. Solana devnet only. Nothing here uses real funds.
+
+<Todo>More questions from partners.</Todo>

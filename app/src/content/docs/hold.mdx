@@ -1,0 +1,23 @@
+# Hold.
+
+Each swINTC is a fixed slice of the pool's liquidity. Its value is read from the pool account, not from an oracle.
+
+## How swINTC is valued
+
+Value per swINTC = liquidity per share × pool reserves ÷ pool liquidity.
+
+In full:
+
+```
+liquidity_per_share × (token_a_amount / 10^dec_a + token_b_amount / 10^dec_b) / pool.liquidity
+```
+
+One token of either issuer counts as one share of stock.
+
+## Where the growth comes from
+
+Every conversion through the Meteora pool leaves a fee in its reserves, so each swINTC is backed by a little more stock. Compounding fees grow the reserves while the pool's liquidity stays the same. See [Fees](/docs/fees).
+
+## Verify it on-chain
+
+Every figure in the app can be checked against the pool account and the swINTC mint on Solana Explorer. The addresses are listed under [Contracts](/docs/overview#contracts).

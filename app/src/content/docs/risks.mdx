@@ -1,0 +1,25 @@
+import { Todo } from "@/components/docs/Todo";
+
+# Risks & protections.
+
+## Issuer powers stay
+
+Pause, freeze and permanent delegate can still halt or drain the pool vaults; the vault cannot prevent that. The scaled-UI multiplier (dividends, splits) shifts the fair raw price, and arbitrage takes that value from LPs. That is why there is a pause and a per-issuer watcher (the Tape).
+
+## Deposit pause
+
+`set_deposits_paused` is the admin's circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open.
+
+## No oracle, no donation attack
+
+Deposits and withdrawals are priced by cp-amm's own `L × reserve / L_total` rule, rounding against the user. Shares track liquidity units, not token balances, so tokens sent to the vault do not change what a share is worth.
+
+## Full range
+
+The pool is full range (x·y = k). Capital is used less efficiently than in a concentrated pool. The production path is a DLMM position concentrated at the peg, with a keeper that compounds fees.
+
+## Devnet only
+
+Everything here runs on Solana devnet with test tokens. Nothing uses real funds.
+
+<Todo>Audit status and a disclosure policy are not published yet.</Todo>
