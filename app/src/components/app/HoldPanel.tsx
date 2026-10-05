@@ -13,7 +13,7 @@ export function HoldPanel() {
   const { publicKey } = useWallet();
   const picker = useWalletPicker();
   const user = data?.user;
-  const nav = data ? navPerShare(data.pool) : 0;
+  const nav = data ? navPerShare(data.pool, data.shareSupply) : 0;
   const shares = user ? Number(user.shares) / 10 ** SHARE_DECIMALS : 0;
 
   return (

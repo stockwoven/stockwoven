@@ -26,7 +26,7 @@ One stock, one token, with all issuers' liquidity in one Meteora DAMM v2 pool. N
 
 ## Capabilities and Constraints
 
-- Deposit and redeem swINTC (single-token deposits in the program, not yet in the app), direct issuer-to-issuer conversion on DAMM v2, permissionless harvest of the protocol fee, test-token faucet, wallet activity history read from chain.
+- Deposit swINTC with both tokens or just one issuer's, redeem it, direct issuer-to-issuer conversion on DAMM v2, permissionless harvest of the protocol fee, test-token faucet, wallet activity history read from chain.
 - Fee split per 0.10% conversion: 64% compounds for holders, 16% treasury, 20% Meteora.
 - Redemptions are never paused by the vault; deposits can be paused by the admin.
 

@@ -23,7 +23,7 @@ function Figure({ label, value, unit, loading }: { label: React.ReactNode; value
 export function VaultStats() {
   const { data } = useVault();
   const loading = !data;
-  const nav = data ? navPerShare(data.pool) : 1;
+  const nav = data ? navPerShare(data.pool, data.shareSupply) : 1;
   const a = data ? Number(data.pool.reserveA) / 10 ** VAULT.decimalsA : 0;
   const b = data ? Number(data.pool.reserveB) / 10 ** VAULT.decimalsB : 0;
 

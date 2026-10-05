@@ -66,7 +66,7 @@ export function VaultTable() {
             </td>
             <td className="num">
               <span className="td-label t-eyebrow">Backing</span>
-              {data ? <span className="t-data">{navPerShare(data.pool).toFixed(6)} INTC</span> : <Skel w={12} />}
+              {data ? <span className="t-data">{navPerShare(data.pool, data.shareSupply).toFixed(6)} INTC</span> : <Skel w={12} />}
             </td>
             <td className="num">
               <span className="td-label t-eyebrow">Supply</span>

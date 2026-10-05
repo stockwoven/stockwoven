@@ -17,6 +17,8 @@ const DAMM_EVENT_AUTHORITY = new PublicKey("3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwp
 export const SHARE_DECIMALS = 8;
 export const TRADE_FEE_BPS = 10;
 export const COMPOUNDING_FEE_BPS = 8_000;
+/** Vault fee on single-token deposits (ZAP_FEE_BPS): kept in the position, no shares minted for it. */
+export const ZAP_FEE_BPS = 5;
 
 export const VAULT = {
   program: new PublicKey(devnet.program),
@@ -39,6 +41,7 @@ export const VAULT = {
 
 const DISC = {
   deposit: [242, 35, 198, 137, 82, 225, 242, 182],
+  depositSingle: [116, 81, 213, 110, 17, 83, 209, 188],
   redeem: [184, 12, 86, 149, 70, 196, 97, 225],
   harvest: [228, 241, 31, 182, 53, 169, 59, 199],
   swap: [248, 198, 158, 145, 225, 117, 135, 200],
@@ -72,6 +75,21 @@ export function depositIx(user: PublicKey, shares: bigint, maxA: bigint, maxB: b
       w(ata(user, VAULT.mintA)), w(ata(user, VAULT.mintB)), w(VAULT.reserveA), w(VAULT.reserveB),
       r(VAULT.mintA), r(VAULT.mintB), w(VAULT.pool), w(VAULT.position), r(VAULT.positionNftAccount),
       w(VAULT.tokenAVault), w(VAULT.tokenBVault), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
+      r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+    ],
+  });
+}
+
+/** Deposits one issuer's token: the vault swaps the right part of it and adds both as liquidity. */
+export function depositSingleIx(user: PublicKey, inputIsA: boolean, amountIn: bigint, minShares: bigint) {
+  return new TransactionInstruction({
+    programId: VAULT.program,
+    data: Buffer.concat([Buffer.from(DISC.depositSingle), Buffer.from([inputIsA ? 1 : 0]), u64(amountIn), u64(minShares)]),
+    keys: [
+      r(user, true), r(VAULT.vault), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)),
+      w(ata(user, VAULT.mintA)), w(ata(user, VAULT.mintB)), w(VAULT.reserveA), w(VAULT.reserveB),
+      r(VAULT.mintA), r(VAULT.mintB), w(VAULT.pool), w(VAULT.position), r(VAULT.positionNftAccount),
+      w(VAULT.tokenAVault), w(VAULT.tokenBVault), r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
       r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
     ],
   });
@@ -119,18 +137,28 @@ export function swapIx(user: PublicKey, aToB: boolean, amountIn: bigint, minOut:
   });
 }
 
-export type PoolState = { liquidity: bigint; reserveA: bigint; reserveB: bigint };
+/** `vaultLiquidity` is the vault position's liquidity: every swINTC is a pro-rata claim on it. */
+export type PoolState = { liquidity: bigint; reserveA: bigint; reserveB: bigint; vaultLiquidity: bigint };
 
-/** Reads cp-amm's Pool account (offsets include the 8-byte discriminator). */
+const u128 = (d: Buffer, offset: number) => d.readBigUInt64LE(offset) + (d.readBigUInt64LE(offset + 8) << 64n);
+
+/** Reads cp-amm's Pool and the vault's Position (offsets include the 8-byte discriminator). */
 export async function fetchPool(conn: Connection): Promise<PoolState> {
-  const info = await conn.getAccountInfo(VAULT.pool);
-  if (!info) throw new Error("pool not found");
-  const d = Buffer.from(info.data);
+  const [pool, position] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position]);
+  if (!pool || !position) throw new Error("pool not found");
+  const d = Buffer.from(pool.data);
   return {
-    liquidity: d.readBigUInt64LE(360) + (d.readBigUInt64LE(368) << 64n),
+    liquidity: u128(d, 360),
     reserveA: d.readBigUInt64LE(680),
     reserveB: d.readBigUInt64LE(688),
+    vaultLiquidity: u128(Buffer.from(position.data), 152),
   };
+}
+
+/** Liquidity behind one raw share unit, rounded as the program does. An empty vault uses the launch ratio. */
+function liquidityPerShare(pool: PoolState, supply: bigint, roundUp: boolean) {
+  if (supply === 0n) return VAULT.liquidityPerShare;
+  return roundUp ? ceilDiv(pool.vaultLiquidity, supply) : pool.vaultLiquidity / supply;
 }
 
 /** One token of either issuer counts as one share of stock. */
@@ -138,14 +166,14 @@ export const stockValue = (a: bigint, b: bigint) =>
   Number(a) / 10 ** VAULT.decimalsA + Number(b) / 10 ** VAULT.decimalsB;
 
 /** Shares of stock behind one whole swINTC. */
-export function navPerShare(pool: PoolState) {
-  const l = Number(VAULT.liquidityPerShare * 10n ** BigInt(SHARE_DECIMALS)) / Number(pool.liquidity);
+export function navPerShare(pool: PoolState, supply: bigint) {
+  const l = Number(liquidityPerShare(pool, supply, false) * 10n ** BigInt(SHARE_DECIMALS)) / Number(pool.liquidity);
   return l * stockValue(pool.reserveA, pool.reserveB);
 }
 
 /** Tokens cp-amm will take for `shares` (it rounds up on deposit, down on redeem). */
-export function quoteShares(pool: PoolState, shares: bigint, roundUp: boolean) {
-  const dl = shares * VAULT.liquidityPerShare;
+export function quoteShares(pool: PoolState, supply: bigint, shares: bigint, roundUp: boolean) {
+  const dl = shares * liquidityPerShare(pool, supply, roundUp);
   const div = roundUp ? ceilDiv : (a: bigint, b: bigint) => a / b;
   return { a: div(dl * pool.reserveA, pool.liquidity), b: div(dl * pool.reserveB, pool.liquidity) };
 }
@@ -159,6 +187,33 @@ export function quoteSwap(pool: PoolState, aToB: boolean, amountIn: bigint) {
   }
   const net = amountIn - fee(amountIn);
   return (pool.reserveA * net) / (pool.reserveB + net);
+}
+
+const isqrt = (n: bigint) => {
+  if (n < 2n) return n;
+  let x0 = n / 2n + 1n;
+  let x1 = (x0 + n / x0) / 2n;
+  while (x1 < x0) [x0, x1] = [x1, (x1 + n / x1) / 2n];
+  return x0;
+};
+
+/**
+ * Mirrors deposit_single: swap `sqrt(r · (r + a)) − r` of the input, add the most liquidity both
+ * balances cover, and mint shares for all but the vault fee. The post-swap reserves leave out the
+ * compounded part of the swap fee, so the quote reads very slightly low.
+ */
+export function quoteDepositSingle(pool: PoolState, supply: bigint, inputIsA: boolean, amountIn: bigint) {
+  const reserveIn = inputIsA ? pool.reserveA : pool.reserveB;
+  const swapped = isqrt(reserveIn * (reserveIn + amountIn)) - reserveIn;
+  const out = swapped > 0n ? quoteSwap(pool, inputIsA, swapped) : 0n;
+  const [a, b] = inputIsA ? [amountIn - swapped, out] : [out, amountIn - swapped];
+  const reserveA = inputIsA ? pool.reserveA + swapped : pool.reserveA - out;
+  const reserveB = inputIsA ? pool.reserveB - out : pool.reserveB + swapped;
+  if (reserveA <= 0n || reserveB <= 0n) return null;
+  const dlA = (a * pool.liquidity) / reserveA;
+  const dlB = (b * pool.liquidity) / reserveB;
+  const forHolder = ((dlA < dlB ? dlA : dlB) * BigInt(10_000 - ZAP_FEE_BPS)) / 10_000n;
+  return forHolder / liquidityPerShare(pool, supply, true);
 }
 
 export function toRaw(value: string, decimals: number): bigint {

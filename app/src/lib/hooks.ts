@@ -69,8 +69,9 @@ export function explainError(e: unknown) {
   if (/reject|denied|declined/i.test(message)) return "You declined the request in your wallet. Nothing was sent.";
   if (/insufficient (funds|lamports)|0x1\b/i.test(message)) return "Not enough devnet SOL or tokens to pay for this. Get test tokens, then try again.";
   if (/blockhash|expired|block height exceeded/i.test(message)) return "The transaction expired before it confirmed. Try again.";
-  if (/DepositsPaused|Deposits are paused|0x1771\b/i.test(message)) return "Deposits are paused by the vault. Redemptions stay open.";
-  if (/slippage/i.test(message)) return "The pool moved past your slippage limit. Refresh the quote and try again.";
+  if (/DepositsPaused|Deposits are paused|0x1771\b|"Custom":6001\b/i.test(message)) return "Deposits are paused by the vault. Redemptions stay open.";
+  if (/InstructionFallbackNotFound|0x65\b|"Custom":101\b/.test(message)) return "The devnet vault program does not support this yet. It needs the latest program upgrade.";
+  if (/slippage|0x177a\b|"Custom":6010\b/i.test(message)) return "The pool moved past your slippage limit. Refresh the quote and try again.";
   return message;
 }
 

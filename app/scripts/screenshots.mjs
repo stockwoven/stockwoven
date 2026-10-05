@@ -5,10 +5,11 @@
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Keypair } from "@solana/web3.js";
 import bs58 from "bs58";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(ROOT, "screenshots");
 fs.mkdirSync(OUT, { recursive: true });
 const DEVNET = JSON.parse(fs.readFileSync(path.join(ROOT, "src/lib/devnet.json"), "utf8"));
@@ -38,6 +39,14 @@ function poolData() {
   b.writeBigUInt64LE(liquidity >> 64n, 368);
   b.writeBigUInt64LE(reserveA, 680);
   b.writeBigUInt64LE(reserveB, 688);
+  return b.toString("base64");
+}
+// The vault's position holds the liquidity behind every swINTC.
+function positionData() {
+  const b = Buffer.alloc(408);
+  const vaultLiquidity = supply * lps;
+  b.writeBigUInt64LE(vaultLiquidity & ((1n << 64n) - 1n), 152);
+  b.writeBigUInt64LE(vaultLiquidity >> 64n, 160);
   return b.toString("base64");
 }
 function tokenAccount(amount) {
@@ -115,6 +124,10 @@ function rpc(method, params, opts) {
     case "getTokenSupply":
       return ctx({ amount: String(supply), decimals: 8, uiAmount: Number(supply) / 1e8, uiAmountString: String(Number(supply) / 1e8) });
     case "getMultipleAccounts": {
+      if (params[0][0] === DEVNET.pool) {
+        const cpAmm = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
+        return ctx([account(poolData(), cpAmm), account(positionData(), cpAmm)]);
+      }
       const [a, b, s] = opts.empty ? [10e8, 10e6, 0] : [8.75 * 1e8, 9.25 * 1e6, 12.345678 * 1e8];
       return ctx([account(tokenAccount(a)), account(tokenAccount(b)), account(tokenAccount(s))]);
     }
@@ -326,6 +339,7 @@ try {
       await shot("tx-confirmed", "app", { connected: true }, deposit, "#vault-panel");
       await shot("tx-failed", "app", { connected: true, mode: "reject" }, deposit, "#vault-panel");
       await shot("redeem-tab", "app", { connected: true }, (p) => p.click("#tab-redeem"), "#vault-panel");
+      await shot("deposit-single", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=mINTCx"), "#vault-panel");
       await shot("portfolio-empty", "app/portfolio", { connected: true, empty: true }, null, ".app-main");
       await shot("portfolio-disconnected", "app/portfolio", {}, null, ".app-main");
       await shot(

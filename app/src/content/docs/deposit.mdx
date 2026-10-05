@@ -22,11 +22,11 @@ A single-token deposit costs a little more than a proportional one:
 
 In tests, a single-token deposit of 0.1% of the pool gets back 99.74% on an immediate redeem. You set a minimum amount of swINTC to receive. If the pool moves past it, the transaction fails.
 
-<Todo>The app's Deposit tab does not offer single-token deposits yet.</Todo>
-
 ## Slippage limit
 
 The app allows up to 0.5% more of each token than the quote. Whatever cp-amm does not take is refunded in the same transaction.
+
+For a single-token deposit, the app asks for at least 99.5% of the quoted swINTC.
 
 ## When deposits are paused
 

@@ -53,6 +53,23 @@
   min-height: 44px;
 }
 
+/* Deposit source: both tokens or one issuer's. Toggle buttons styled like the selected tab. */
+.tabs--three {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-self: stretch;
+}
+
+.tabs--three button {
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+.tabs button[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--on-purple);
+}
+
 .tile--flush {
   padding: var(--space-2) var(--space-6);
 }
