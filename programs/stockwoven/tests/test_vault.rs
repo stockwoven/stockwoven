@@ -147,6 +147,11 @@ fn compute_limit(units: u32) -> Instruction {
     Instruction::new_with_bytes(COMPUTE_BUDGET_PROGRAM, &data, vec![])
 }
 
+thread_local! {
+    /// Compute units and logs of the last transaction `send` landed, for the compute-unit profile.
+    static LAST_LOGS: std::cell::RefCell<(u64, Vec<String>)> = const { std::cell::RefCell::new((0, Vec::new())) };
+}
+
 fn send(svm: &mut LiteSVM, ixs: &[Instruction], payer: &Keypair, signers: &[&Keypair]) -> Result<u64, String> {
     let mut all = vec![compute_limit(1_400_000)];
     all.extend_from_slice(ixs);
@@ -154,7 +159,10 @@ fn send(svm: &mut LiteSVM, ixs: &[Instruction], payer: &Keypair, signers: &[&Key
     let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), signers).unwrap();
     let result = svm
         .send_transaction(tx)
-        .map(|meta| meta.compute_units_consumed)
+        .map(|meta| {
+            LAST_LOGS.with(|last| *last.borrow_mut() = (meta.compute_units_consumed, meta.logs.clone()));
+            meta.compute_units_consumed
+        })
         .map_err(|e| format!("{:?}\n{}", e.err, e.meta.logs.join("\n")));
     svm.expire_blockhash();
     result
@@ -668,4 +676,109 @@ fn paused_vault_rejects_deposits_but_allows_redeem() {
         stockwoven::accounts::AdminOnly { admin: stranger.kp.pubkey(), vault: env.vault }.to_account_metas(None),
     );
     assert!(send(&mut env.svm, &[pause], &stranger.kp, &[&stranger.kp]).is_err());
+}
+
+/// Compute units each program spent itself in the last transaction (its total minus the CPIs it
+/// made), read from the "invoke [n]" / "consumed" / "success" log lines. Native programs (System,
+/// Compute Budget) log no "consumed" line, so their cost stays with their caller.
+fn cu_by_program() -> Vec<(String, u64)> {
+    // (program, CU of its CPIs, its own "consumed" figure)
+    let mut stack: Vec<(String, u64, Option<u64>)> = Vec::new();
+    let mut own: Vec<(String, u64)> = Vec::new();
+    LAST_LOGS.with(|last| {
+        for line in last.borrow().1.iter() {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            match words.as_slice() {
+                ["Program", id, "invoke", _] => stack.push((id.to_string(), 0, None)),
+                ["Program", _, "consumed", used, "of", ..] => {
+                    if let Some(top) = stack.last_mut() {
+                        top.2 = used.parse().ok();
+                    }
+                }
+                ["Program", _, "success"] | ["Program", _, "failed", ..] => {
+                    let Some((id, children, Some(used))) = stack.pop() else { continue };
+                    if let Some(parent) = stack.last_mut() {
+                        parent.1 += used;
+                    }
+                    let name = match id.as_str() {
+                        "H9ZJiWoKXGrje8Y3errCSh2uXUiNpf8mDmjJ7TapZm7b" => "stockwoven",
+                        "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG" => "cp-amm",
+                        "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA" | "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb" => "token",
+                        _ => "other",
+                    };
+                    match own.iter_mut().find(|(n, _)| n == name) {
+                        Some(entry) => entry.1 += used - children,
+                        None => own.push((name.to_string(), used - children)),
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+    own
+}
+
+fn report(label: &str, cu: u64) {
+    // CU_LOGS=1 also prints the transaction's logs, e.g. to read `sol_log_compute_units` markers.
+    if std::env::var_os("CU_LOGS").is_some() {
+        LAST_LOGS.with(|last| last.borrow().1.iter().for_each(|line| println!("    {line}")));
+    }
+    let parts = cu_by_program();
+    let get = |n: &str| parts.iter().find(|(p, _)| p == n).map_or(0, |(_, c)| *c);
+    println!(
+        "| {label:<32} | {cu:>7} | {:>10} | {:>7} | {:>6} | {:>5} |",
+        get("stockwoven"),
+        get("cp-amm"),
+        get("token"),
+        get("other") + cu.saturating_sub(parts.iter().map(|(_, c)| c).sum::<u64>()),
+    );
+}
+
+/// Compute-unit baseline per instruction, split by program. Not a check:
+/// `cargo test -p stockwoven --test test_vault -- --ignored --nocapture cu_profile`
+#[test]
+#[ignore]
+fn cu_profile() {
+    println!("| instruction | total CU | stockwoven | cp-amm | token | other |");
+    println!("|---|---|---|---|---|---|");
+    for issuers in [Issuers::Spl, Issuers::Token2022 { badges: true }] {
+        let tag = if issuers == Issuers::Spl { "SPL" } else { "T22" };
+        let mut env = Env::new(issuers);
+        env.try_initialize().unwrap();
+        // try_initialize sends the transaction itself; it is the last one landed.
+        report(&format!("{tag} initialize_vault"), LAST_LOGS.with(|last| last.borrow().0));
+
+        let user = env.user(10 * ONE_A, 10 * ONE_B);
+        let ix = env.deposit_ix(&user, ONE_SHARE, 2 * ONE_A, 2 * ONE_B);
+        let cu = send(&mut env.svm, &[ix], &user.kp, &[&user.kp]).unwrap();
+        report(&format!("{tag} deposit"), cu);
+
+        for input_is_a in [true, false] {
+            let amount = if input_is_a { ONE_A / 100 } else { ONE_B / 100 };
+            let ix = env.deposit_single_ix(&user, input_is_a, amount, 1);
+            let cu = send(&mut env.svm, &[ix], &user.kp, &[&user.kp]).unwrap();
+            report(&format!("{tag} deposit_single ({})", if input_is_a { "A" } else { "B" }), cu);
+        }
+
+        let ix = env.swap_ix(&user.kp.pubkey(), &user.a, &user.b, ONE_A / 10);
+        let cu = send(&mut env.svm, &[ix], &user.kp, &[&user.kp]).unwrap();
+        report(&format!("{tag} swap (cp-amm only)"), cu);
+
+        let ix = env.harvest_ix();
+        let cu = send(&mut env.svm, &[ix], &user.kp, &[&user.kp]).unwrap();
+        report(&format!("{tag} harvest"), cu);
+
+        let ix = env.redeem_ix(&user.kp.pubkey(), &user.shares, &user.a, &user.b, ONE_SHARE / 2);
+        let cu = send(&mut env.svm, &[ix], &user.kp, &[&user.kp]).unwrap();
+        report(&format!("{tag} redeem"), cu);
+
+        let admin = env.admin.insecure_clone();
+        let pause = Instruction::new_with_bytes(
+            stockwoven::id(),
+            &stockwoven::instruction::SetDepositsPaused { paused: true }.data(),
+            stockwoven::accounts::AdminOnly { admin: admin.pubkey(), vault: env.vault }.to_account_metas(None),
+        );
+        let cu = send(&mut env.svm, &[pause], &admin, &[&admin]).unwrap();
+        report(&format!("{tag} set_deposits_paused"), cu);
+    }
 }
