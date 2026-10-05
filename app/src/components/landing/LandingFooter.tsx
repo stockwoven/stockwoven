@@ -41,19 +41,17 @@ export function LandingFooter() {
           <p className="t-body muted">Solana devnet only. Nothing here uses real funds.</p>
         </div>
         <div className="footer__links">
-          {COLUMNS.map((c) => (
+          {COLUMNS.map((c) => ({ ...c, links: c.links.filter((l): l is { href: string; label: string } => !!l.href) }))
+            .filter((c) => c.links.length > 0)
+            .map((c) => (
             <nav key={c.title} aria-label={c.title}>
               <p className="t-eyebrow muted">{c.title}</p>
               <ul>
                 {c.links.map((l) => (
                   <li key={l.label}>
-                    {l.href ? (
-                      <Link href={l.href} className="t-body">
-                        {l.label}
-                      </Link>
-                    ) : (
-                      <span className="t-body muted todo-link">{l.label} [TODO]</span>
-                    )}
+                    <Link href={l.href} className="t-body">
+                      {l.label}
+                    </Link>
                   </li>
                 ))}
               </ul>

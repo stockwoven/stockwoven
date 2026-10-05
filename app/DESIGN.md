@@ -31,7 +31,7 @@ Three areas, each with its own layout and its own CSS file next to its route.
 - **Weave.** Only on the landing (hero and closing CTA). From 1024px it's full-bleed in the right half with `fade` toward the text. Below that it's a strip under the copy. It never appears in the app or the docs.
 - **Bento grids.** 1 → 2 → 4 columns at 640 / 1024px, `radius-lg`, `space-3` gaps, no shadows, one inverse tile per row.
 - **Tables.** The vault list, activity and assets are tables from 768px and label/value lists below that.
-- **Accent.** Purple marks primary buttons, the active tab or page, the `sw` prefix, the holders' share, the pending state, "Learn more →" links and section eyebrows (`accent-text`).
+- **Accent.** Purple marks primary buttons, the active tab or page, the `sw` prefix, the holders' share, the pending state and "Learn more →" links (`accent-text`). The landing has no eyebrow labels above headings.
 
 ## Help text in the app
 

@@ -6,8 +6,9 @@ import { Button, ButtonLink, Mark } from "../ds";
 import { Sheet } from "../Sheet";
 
 const NAV = [
-  { href: "#product", label: "Product" },
+  { href: "#how", label: "How it works" },
   { href: "#partners", label: "Partners" },
+  { href: "#faq", label: "FAQ" },
   { href: "/docs/overview", label: "Docs" },
 ];
 

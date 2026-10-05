@@ -1,39 +1,193 @@
 /* Landing: sells, never operates. */
 
-.island {
-  min-height: 160px;
-  justify-content: space-between;
+/* Head beside its content from 1024px (fees, FAQ). */
+.split {
+  display: grid;
+  gap: var(--space-8);
 }
 
-.asset-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
+.split > .section__head {
+  margin-bottom: 0;
 }
 
-.asset-chips li {
+.section__head p {
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+
+@media (min-width: 1024px) {
+  .split {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: var(--space-16);
+    align-items: start;
+  }
+}
+
+/* ---------- Mechanism: issuer tokens → pool → sw token ---------- */
+
+.flow {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-12);
+}
+
+.flow__inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.flow__node {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   gap: var(--space-2);
   padding: var(--space-4);
-  min-width: 160px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
+  min-width: 0;
 }
 
-.steps + .sw-btn {
-  margin-top: var(--space-6);
+.flow__node--pool {
+  border-style: dashed;
+  background: transparent;
 }
+
+.flow__node--out {
+  background: var(--surface-inverse);
+  border-color: var(--surface-inverse);
+  color: var(--text-inverse);
+}
+
+/* On the inverse tile the prefix needs the dark-theme accent to keep its contrast. */
+.flow__node--out .accent-text {
+  color: var(--purple-soft);
+}
+
+.flow__arrow {
+  align-self: center;
+  flex: none;
+  color: var(--text-subtle);
+  transform: rotate(90deg);
+}
+
+@media (min-width: 768px) {
+  .flow {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .flow__inputs {
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1 1 0;
+  }
+
+  .flow__node--pool,
+  .flow__node--out {
+    flex: 1 1 0;
+    align-self: stretch;
+  }
+
+  .flow__arrow {
+    transform: none;
+  }
+}
+
+@media (min-width: 1024px) {
+  .flow__node {
+    padding: var(--space-6);
+  }
+}
+
+.steps__n {
+  display: inline-block;
+  min-width: 2ch;
+  margin-right: var(--space-2);
+}
+
+.steps {
+  margin-bottom: var(--space-4);
+}
+
+/* ---------- Fee split ---------- */
+
+.fees {
+  gap: var(--space-6);
+}
+
+.fee-bar {
+  display: flex;
+  gap: 2px;
+  height: var(--space-6);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.fee-bar i {
+  display: block;
+  flex-basis: 0;
+}
+
+.fee-bar__holders,
+.fee-key__holders {
+  background: var(--accent);
+}
+
+.fee-bar__treasury,
+.fee-key__treasury {
+  background: var(--text);
+}
+
+.fee-bar__meteora,
+.fee-key__meteora {
+  background: var(--brand-gray);
+}
+
+.fees .kv > div {
+  flex-wrap: nowrap;
+  padding-block: var(--space-3);
+}
+
+.fees dt {
+  color: var(--text-body);
+}
+
+.fees dd {
+  flex: none;
+  margin: 0;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.fees__source {
+  display: block;
+  margin-top: var(--space-1);
+  margin-left: calc(var(--space-3) + var(--space-2));
+}
+
+/* ---------- Supported stocks ---------- */
+
+.assets .sw-chip {
+  font-size: 16px;
+}
+
+/* ---------- Partners ---------- */
 
 .partners {
   gap: var(--space-4);
 }
 
+.partners p,
+.partner-sample p {
+  max-width: 60ch;
+}
+
 .partner-sample {
   justify-content: center;
+  margin: 0;
 }
 
 .partner-sample__row {
@@ -51,6 +205,67 @@
   padding-top: var(--space-4);
   border-top: 1px solid var(--line);
 }
+
+/* ---------- FAQ ---------- */
+
+.faq {
+  border-top: 1px solid var(--line);
+}
+
+.faq details {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: 56px;
+  padding-block: var(--space-3);
+  font-size: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.faq summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Plus that turns into a minus: two 2px square-cap strokes. */
+.faq summary::after {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 14px;
+  background:
+    linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat;
+}
+
+.faq details[open] summary::after {
+  background: linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat;
+}
+
+.faq summary:hover {
+  color: var(--accent-text);
+}
+
+.faq summary:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+.faq details p {
+  max-width: 60ch;
+  margin: 0;
+}
+
+.faq details > :last-child {
+  margin-bottom: var(--space-3);
+}
+
+/* ---------- Closing band ---------- */
 
 .cta {
   position: relative;
