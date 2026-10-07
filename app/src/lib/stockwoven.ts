@@ -378,10 +378,13 @@ export function sharesFor(s: VaultState, amounts: bigint[]) {
   return lo;
 }
 
-/** x·y = k with the pool's fee, charged in token B: on output for A→B, on input for B→A. */
+/**
+ * x·y = k with the pool's fee, charged in token B: on output for A→B, on input for B→A. The fee
+ * rounds up, as cp-amm does, which matters on tiny swaps.
+ */
 export function quoteSwap(st: PoolState, feeBps: number, aToB: boolean, amountIn: bigint) {
   if (amountIn <= 0n || st.reserveA === 0n || st.reserveB === 0n) return 0n;
-  const fee = (x: bigint) => (x * BigInt(feeBps)) / 10_000n;
+  const fee = (x: bigint) => ceilDiv(x * BigInt(feeBps), 10_000n);
   if (aToB) {
     const gross = (st.reserveB * amountIn) / (st.reserveA + amountIn);
     return gross - fee(gross);
@@ -426,6 +429,8 @@ export function bestRoute(states: PoolState[], from: number, to: number, amountI
 
 /** Each swap in a one-token route keeps this much below its quote; the deposit is sized on the minimums. */
 export const ROUTE_SLIPPAGE_BPS = 50n;
+/** Slices worth less than this are not swapped: integer rounding makes dust swaps fail their limits. */
+const MIN_SWAP_USD = 0.05;
 const minOf = (x: bigint) => (x * (10_000n - ROUTE_SLIPPAGE_BPS)) / 10_000n;
 
 export type Swap = { pool: Pool; aToB: boolean; amountIn: bigint; minOut: bigint };
@@ -437,6 +442,11 @@ export type ZapQuote = {
   swaps: Swap[];
   /** The deposit: the most it may take of each asset, and the shares it mints. */
   maxAmounts: bigint[];
+  /**
+   * Slices too small to swap, which the wallet pays directly from what it already holds (for SOL,
+   * the app wraps it). Zero for the rest.
+   */
+  fromWallet: bigint[];
   shares: bigint;
   /** USD value of the input and of the shares at the vault's value per share. */
   usdIn: number;
@@ -459,11 +469,18 @@ export function quoteZapIn(s: VaultState, input: number, amountIn: bigint): ZapQ
   const states = poolStates(s);
   const swaps: Swap[] = [];
   const amounts = ASSETS.map(() => 0n);
+  const fromWallet = ASSETS.map(() => 0n);
   let spent = 0n;
   ASSETS.forEach((_, k) => {
     if (k === input || values[k] === 0) return;
     const slice = (amountIn * BigInt(Math.floor((values[k] / total) * 1e9))) / 1_000_000_000n;
-    if (slice === 0n) return;
+    const sliceUsd = whole(slice, input) * px[input];
+    if (sliceUsd < MIN_SWAP_USD) {
+      // Too small to swap, but the deposit still needs every asset: the wallet pays it, with room.
+      if (px[k] > 0) fromWallet[k] = BigInt(Math.ceil(((sliceUsd * 2) / px[k]) * 10 ** ASSETS[k].decimals)) + 1n;
+      amounts[k] = fromWallet[k];
+      return;
+    }
     const route = bestRoute(states, input, k, slice);
     if (!route) return;
     let x = slice;
@@ -488,8 +505,9 @@ export function quoteZapIn(s: VaultState, input: number, amountIn: bigint): ZapQ
     amountIn,
     swaps,
     maxAmounts: amounts,
+    fromWallet,
     shares,
-    usdIn: whole(amountIn, input) * px[input],
+    usdIn: whole(amountIn, input) * px[input] + usdOf(fromWallet, px),
     usdOut: (Number(shares) / 10 ** SHARE_DECIMALS) * perShare,
   };
 }
@@ -508,8 +526,10 @@ export function quoteZapOut(s: VaultState, shares: bigint, output: number): ZapO
   });
   const swaps: Swap[] = [];
   let out = amounts[output];
+  const px = prices(s);
   amounts.forEach((amount, k) => {
-    if (k === output || amount === 0n) return;
+    // Dust stays in the wallet as it is.
+    if (k === output || amount === 0n || whole(amount, k) * px[k] < MIN_SWAP_USD) return;
     const route = bestRoute(states, k, output, amount);
     if (!route) return;
     let x = amount;
@@ -521,7 +541,7 @@ export function quoteZapOut(s: VaultState, shares: bigint, output: number): ZapO
     }
     out += x;
   });
-  return { amounts, swaps, out, usdOut: whole(out, output) * prices(s)[output] };
+  return { amounts, swaps, out, usdOut: whole(out, output) * px[output] };
 }
 
 // ---- formatting -----------------------------------------------------------------------------

@@ -83,43 +83,64 @@ export function explainError(e: unknown) {
 }
 
 /**
- * Signs and confirms a transaction with the connected wallet, tracking its status. With a
- * `lookupTable` it sends a v0 transaction, for instructions that touch too many accounts otherwise.
+ * Signs and confirms transactions with the connected wallet, tracking their status. With a
+ * `lookupTable` they are v0 transactions, for instructions that touch too many accounts otherwise.
+ *
+ * `ixs` can be several steps (an array of instruction lists): each becomes its own transaction,
+ * all signed in one wallet prompt where the wallet supports it, then sent and confirmed in order.
+ * A one-token deposit needs this: its swaps and the deposit together exceed the runtime's limit
+ * of 64 instructions and inner calls per transaction.
  */
 export function useSend(onDone: () => void) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, signAllTransactions } = useWallet();
   const [status, setStatus] = useState<TxStatus>(null);
 
   const send = useCallback(
-    async (label: string, ixs: TransactionInstruction[], lookupTable?: PublicKey) => {
+    async (label: string, ixs: TransactionInstruction[] | TransactionInstruction[][], lookupTable?: PublicKey) => {
       if (!publicKey) return;
+      const steps = (Array.isArray(ixs[0]) ? ixs : [ixs]) as TransactionInstruction[][];
       try {
         setStatus({ kind: "pending", text: `Approve the ${label.toLowerCase()} in your wallet.` });
-        const instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...ixs];
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
-        let tx: Transaction | VersionedTransaction;
-        if (lookupTable) {
-          const table = (await connection.getAddressLookupTable(lookupTable)).value;
-          if (!table) throw new Error("address lookup table not found");
-          const message = new TransactionMessage({ payerKey: publicKey, recentBlockhash: blockhash, instructions });
-          tx = new VersionedTransaction(message.compileToV0Message([table]));
-        } else {
-          tx = new Transaction().add(...instructions);
+        const table = lookupTable ? (await connection.getAddressLookupTable(lookupTable)).value : null;
+        if (lookupTable && !table) throw new Error("address lookup table not found");
+        const txs = steps.map((step) => {
+          const instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...step];
+          if (table) {
+            const message = new TransactionMessage({ payerKey: publicKey, recentBlockhash: blockhash, instructions });
+            return new VersionedTransaction(message.compileToV0Message([table]));
+          }
+          const tx = new Transaction().add(...instructions);
           tx.recentBlockhash = blockhash;
           tx.feePayer = publicKey;
+          return tx;
+        });
+
+        const confirm = async (signature: string, i: number) => {
+          const of = txs.length > 1 ? ` (${i + 1} of ${txs.length})` : "";
+          setStatus({ kind: "pending", text: `Sent${of}. Waiting for devnet to confirm it.`, signature });
+          const result = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+          if (result.value.err) throw new Error(JSON.stringify(result.value.err));
+          return signature;
+        };
+
+        let last = "";
+        if (txs.length > 1 && signAllTransactions) {
+          const signed = await signAllTransactions(txs);
+          for (const [i, tx] of signed.entries()) {
+            last = await confirm(await connection.sendRawTransaction(tx.serialize()), i);
+          }
+        } else {
+          for (const [i, tx] of txs.entries()) last = await confirm(await sendTransaction(tx, connection), i);
         }
-        const signature = await sendTransaction(tx, connection);
-        setStatus({ kind: "pending", text: "Sent. Waiting for devnet to confirm it.", signature });
-        const result = await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
-        if (result.value.err) throw new Error(JSON.stringify(result.value.err));
-        setStatus({ kind: "ok", text: `${label} confirmed.`, signature });
+        setStatus({ kind: "ok", text: `${label} confirmed.`, signature: last });
         onDone();
       } catch (e) {
         setStatus({ kind: "err", text: explainError(e) });
       }
     },
-    [connection, publicKey, sendTransaction, onDone],
+    [connection, publicKey, sendTransaction, signAllTransactions, onDone],
   );
 
   return { send, status, setStatus };

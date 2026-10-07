@@ -89,6 +89,10 @@ export function VaultPanel() {
   else if (!deposit && payout === "usdc" && !zapOut) problem = "Amount too small";
   else if (user && oneToken && source === SOL && user.balances[SOL] < raw + SOL_RESERVE) problem = "Keep 0.015 SOL for fees";
   else if (user && oneToken && user.balances[source as number] < raw) problem = `Not enough ${input!.symbol}`;
+  else if (user && zapIn?.fromWallet.some((x, k) => x > 0n && user.balances[k] < x + (k === source ? raw : 0n))) {
+    const k = zapIn.fromWallet.findIndex((x, i) => x > 0n && user.balances[i] < x);
+    problem = `Needs a little ${ASSETS[k].symbol} in the wallet`;
+  }
   else if (user && !oneToken && deposit && mixQuote?.some((x, k) => user.balances[k] < x)) {
     const k = mixQuote.findIndex((x, i) => user.balances[i] < x);
     problem = `Not enough ${ASSETS[k].symbol}`;
@@ -98,8 +102,15 @@ export function VaultPanel() {
     if (!publicKey || !state) return;
     const ixs: TransactionInstruction[] = ensureAccountsIxs(publicKey, user?.exists);
     if (deposit && oneToken && zapIn) {
-      if (source === SOL) ixs.push(...wrapSolIxs(publicKey, raw));
-      ixs.push(...swapIxs(publicKey, zapIn.swaps), depositIx(publicKey, zapIn.shares, zapIn.maxAmounts));
+      // Two transactions signed together: the swaps, then the deposit. In one they would pass the
+      // runtime's limit of 64 instructions and inner calls.
+      const wrap = (source === SOL ? raw : 0n) + zapIn.fromWallet[SOL];
+      if (SOL >= 0 && wrap > 0n) ixs.push(...wrapSolIxs(publicKey, wrap));
+      ixs.push(...swapIxs(publicKey, zapIn.swaps));
+      const second = [depositIx(publicKey, zapIn.shares, zapIn.maxAmounts)];
+      if (SOL >= 0) second.push(unwrapSolIx(publicKey));
+      send("Deposit", [ixs, second], VAULT.lookupTable ?? undefined);
+      return;
     } else if (deposit && mixQuote) {
       const max = mixQuote.map((x) => plus(x, SLIPPAGE_BPS));
       // The SOL slice is paid from wSOL: wrap what the wallet does not hold as wSOL yet.
@@ -248,7 +259,7 @@ export function VaultPanel() {
               </div>
               <div>
                 <dt className="t-body">Route</dt>
-                <dd className="t-data">{zapIn ? `${zapIn.swaps.length} swaps into the vault's mix, then one deposit` : "—"}</dd>
+                <dd className="t-data">{zapIn ? `${zapIn.swaps.length} swaps into the vault's mix, then the deposit (2 transactions, one approval)` : "—"}</dd>
               </div>
             </>
           ) : !deposit && payout === "usdc" ? (
