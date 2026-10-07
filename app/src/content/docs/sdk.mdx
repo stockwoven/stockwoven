@@ -1,0 +1,57 @@
+# SDK.
+
+`@stockwoven/sdk` is a TypeScript SDK for neobanks and fintechs. It reads the swSPCX vault and your customers' positions, prices deposits and redemptions, and builds the transactions. It never holds keys: you sign with your own custody, whether that is a backend key, an MPC or wallet-as-a-service provider, or the customer's wallet in your app.
+
+Devnet only for now. The preset vault is swSPCX: the three issuers' SpaceX tokens (xStocks SPCXx, Backpack SPCX, Ondo SPCXon, as mocks with their real decimals), USDC and SOL, across four Meteora DAMM v2 pools.
+
+## Install
+
+The SDK is in the repository's `sdk/` folder. Until it is on npm, install the tarball that `npm pack` builds there:
+
+```bash
+npm install @solana/web3.js @solana/spl-token ./stockwoven-sdk-0.2.0.tgz
+```
+
+It runs in Node 20+ and in browsers.
+
+## Deposit for a customer
+
+```ts
+import { Connection } from "@solana/web3.js";
+import { Stockwoven, toRaw } from "@stockwoven/sdk";
+
+const sw = new Stockwoven({ connection: new Connection("https://api.devnet.solana.com", "confirmed") });
+
+const quote = await sw.quoteDeposit({ pay: "USDC", amount: toRaw("20", 6) });
+const built = await sw.buildDeposit(quote, { owner: customer.publicKey, feePayer: treasury.publicKey });
+await sw.sendAll(built, [treasury, customer]);
+```
+
+`feePayer` is optional. When it is your key, you pay the network fees and token-account rent, and the customer needs no SOL unless they pay with SOL.
+
+## What a customer can pay with
+
+| `pay` | Transactions | What happens |
+|---|---|---|
+| `"mix"` with `shares` | 1 | Every asset in the vault's current proportions, for an exact number of shares. Unused amounts are refunded. |
+| `"USDC"`, `"SOL"`, `"SPCXx"`, `"SPCX"` or `"SPCXon"` with `amount` | 2 | The first transaction swaps the token into each asset the vault holds; the second deposits them and mints exactly the quoted shares. |
+
+A one-token deposit is two transactions because the swaps and the deposit together exceed Solana's limit of 64 instructions and inner calls per transaction. A wallet signs both in one prompt (`signAllTransactions`); send and confirm them in order.
+
+Redemptions pay a slice of every asset in kind, or with `{ receive: "USDC" }`, everything swapped into USDC in the same transaction. The vault never pauses redemptions.
+
+## Reading the vault
+
+`getVault()` returns the value of one swSPCX in USD, the vault's total value, its exposure (the share of value in SpaceX tokens, USDC and SOL), each pool's value and target weight, the idle reserves and the pause flag. `getPosition(owner)` returns a customer's swSPCX, its USD value and what redeeming it in kind would pay. `getActivity(owner)` lists their latest deposits, redemptions and swaps.
+
+## Limits
+
+- Quotes are refused when their swaps would lose more than `maxLossBps` of the value (default 3%). The devnet SOL pools are small, so keep SOL deposits under about 0.05 SOL.
+- Every deposit and redemption closes the owner's wrapped-SOL account at the end and returns it as SOL.
+- Backpack's SpaceX token is called SPCX, like swSPCX's ticker. Show the issuer next to it.
+
+## Errors
+
+`parseError(error)` turns a failed transaction into a `kind` you can branch on (`DepositsPaused`, `SlippageExceeded`, `InsufficientFunds`, `TooManyInstructions`, `BlockhashExpired`, `RateLimited`, `Rejected`) and a sentence for your own copy.
+
+The full reference, with every method and option, is in `sdk/README.md`; a custodial backend example is in `sdk/examples/custodial-backend.ts`.

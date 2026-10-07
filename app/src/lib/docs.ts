@@ -9,6 +9,7 @@ export const DOCS = [
   { slug: "markets", title: "Markets" },
   { slug: "risks", title: "Risks & protections" },
   { slug: "for-partners", title: "For partners" },
+  { slug: "sdk", title: "SDK" },
   { slug: "faq", title: "FAQ" },
   { slug: "glossary", title: "Glossary" },
 ] as const;

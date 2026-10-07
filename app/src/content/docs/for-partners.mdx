@@ -6,9 +6,9 @@ Inside a neobank's app, the neobank's brand leads. Stockwoven stays small and co
 
 ## Integration
 
-The vault program is open: deposit and redeem are plain Solana instructions, and swaps go straight to the Meteora pools, so any router can fill them. Your customers can pay with USDC and get USDC back: the swaps into and out of the vault's mix run in the same transaction as the deposit or redemption. The account order is in the app's client (`app/src/lib/stockwoven.ts`).
+The vault program is open: deposit and redeem are plain Solana instructions, and swaps go straight to the Meteora pools, so any router can fill them. Your customers can pay with USDC and get USDC back. A deposit from one token is two transactions, signed together: the swaps into the vault's mix, then the deposit. A redemption to USDC is one.
 
-The integration guide, SDK and support contact are not published yet.
+The [SDK](/docs/sdk) reads the vault, prices deposits and redemptions, and builds these transactions for your custody to sign. The integration guide and support contact are not published yet.
 
 ## The Powered by badge
 

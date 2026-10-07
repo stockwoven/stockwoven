@@ -14,6 +14,7 @@ import {
   ensureAccountsIxs,
   fromRaw,
   harvestIx,
+  treasuryAccountIxs,
   poolSwapIx,
   quoteSwap,
   toRaw,
@@ -188,7 +189,7 @@ export function HarvestPanel() {
             block
             disabled={pending}
             aria-busy={pending}
-            onClick={() => publicKey && send("Harvest", POOLS.map((_, i) => harvestIx(publicKey, i)), VAULT.lookupTable ?? undefined)}
+            onClick={() => publicKey && send("Harvest", [...treasuryAccountIxs(publicKey), ...POOLS.map((_, i) => harvestIx(publicKey, i))], VAULT.lookupTable ?? undefined)}
           >
             {pending ? "Waiting for confirmation…" : "Harvest protocol fee"}
           </Button>

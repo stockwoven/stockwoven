@@ -1,0 +1,44 @@
+{
+  "name": "@stockwoven/sdk",
+  "version": "0.2.0",
+  "description": "Read, quote and build Stockwoven vault transactions on Solana: one yield-bearing token per stock, across issuers and pools.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:devnet": "node --import tsx --test test/devnet.e2e.ts",
+    "example:custodial": "tsx examples/custodial-backend.ts"
+  },
+  "dependencies": {
+    "buffer": "^6.0.3"
+  },
+  "peerDependencies": {
+    "@solana/spl-token": "^0.4.0",
+    "@solana/web3.js": "^1.95.0"
+  },
+  "devDependencies": {
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.98.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

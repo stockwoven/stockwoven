@@ -180,6 +180,16 @@ export function harvestIx(caller: PublicKey, index: number) {
   });
 }
 
+/**
+ * Opens the treasury's account for each pool's fee token where it is missing; `payer` pays the
+ * rent. Harvest pays into them, and a wSOL account closes whenever its owner unwraps.
+ */
+export function treasuryAccountIxs(payer: PublicKey): TransactionInstruction[] {
+  return [...new Set(POOLS.map((p) => p.b))].map((k) =>
+    createAssociatedTokenAccountIdempotentInstruction(payer, ata(VAULT.treasury, ASSETS[k].mint, ASSETS[k].tokenProgram), VAULT.treasury, ASSETS[k].mint, ASSETS[k].tokenProgram),
+  );
+}
+
 /** A swap on any cp-amm pool, between the wallet's two token accounts. */
 export function poolSwapIx(p: Pool, user: PublicKey, aToB: boolean, amountIn: bigint, minOut: bigint) {
   const [ua, ub] = [assetAccount(user, p.a), assetAccount(user, p.b)];

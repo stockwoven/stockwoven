@@ -15,6 +15,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { TransactionInstruction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import {
   Devnet,
   Hop,
@@ -23,9 +24,11 @@ import {
   VaultState,
   admin,
   arbitrageIx,
+  ata,
   harvestIx,
   holdings,
   lookupTable,
+  pk,
   positionAmounts,
   prices,
   quoteSwap,
@@ -321,7 +324,12 @@ async function rebalance(d: Devnet) {
 
 async function harvest(d: Devnet, k: KeeperState) {
   if (Date.now() / 1000 - k.lastHarvest < HARVEST_EVERY_SEC) return;
-  const sig = await sendV0(d.pools.map((_, i) => harvestIx(d, i, admin.publicKey)), [admin], await lookupTable(d));
+  // Harvest pays each pool's fee token into the treasury's account for it; open any that is missing.
+  const feeTokens = [...new Set(d.pools.map((p) => d.assets[p.b]))];
+  const open = feeTokens.map((a) =>
+    createAssociatedTokenAccountIdempotentInstruction(admin.publicKey, ata(pk(d.treasury), pk(a.mint), pk(a.tokenProgram)), pk(d.treasury), pk(a.mint), pk(a.tokenProgram)),
+  );
+  const sig = await sendV0([...open, ...d.pools.map((_, i) => harvestIx(d, i, admin.publicKey))], [admin], await lookupTable(d));
   k.lastHarvest = Date.now() / 1000;
   log("harvested every pool's protocol fee to the treasury", sig);
 }
