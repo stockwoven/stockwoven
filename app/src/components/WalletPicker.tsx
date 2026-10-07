@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, createContext, useContext, useRef, useState } from "react";
+import { ReactNode, createContext, useContext, useEffect, useRef, useState } from "react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useMounted } from "@/lib/useMounted";
@@ -9,12 +9,36 @@ import { Sheet } from "./Sheet";
 
 const PickerContext = createContext<{ open: () => void }>({ open: () => {} });
 
+/** How long a wallet may stay "connecting" before the app gives up and lets the person try again. */
+const CONNECT_TIMEOUT_MS = 15_000;
+
 export const useWalletPicker = () => useContext(PickerContext);
 
 /** Lists the Wallet Standard wallets the browser exposes. Selecting one connects it (autoConnect). */
 export function WalletPickerProvider({ children }: { children: ReactNode }) {
-  const { wallets, select } = useWallet();
+  const { wallets, select, wallet, connecting, disconnect } = useWallet();
   const [isOpen, setOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // A wallet that never answers (its popup was closed or blocked, the extension is locked, or the
+  // page is not on https or localhost) would leave the app connecting forever. After the timeout,
+  // drop the attempt and forget the choice, so the next page load does not retry it either.
+  useEffect(() => {
+    if (!connecting) return;
+    const name = wallet?.adapter.name ?? "The wallet";
+    const timer = setTimeout(() => {
+      disconnect().catch(() => {});
+      select(null);
+      setNotice(
+        `${name} did not answer within ${CONNECT_TIMEOUT_MS / 1000} seconds. Unlock it, check that no popup is waiting, and try again. ` +
+          (typeof window !== "undefined" && !window.isSecureContext
+            ? "This page is not on https or localhost, and some wallets refuse to connect there: open the app at its https address or on this computer's localhost."
+            : "If it keeps happening, reload the page."),
+      );
+      setOpen(true);
+    }, CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [connecting, wallet, disconnect, select]);
   const dialog = useRef<HTMLDialogElement>(null);
   const mounted = useMounted();
   const available = (mounted ? wallets : []).filter(
@@ -33,6 +57,11 @@ export function WalletPickerProvider({ children }: { children: ReactNode }) {
             Close
           </Button>
         </div>
+        {notice && (
+          <p className="t-body body" role="alert">
+            {notice}
+          </p>
+        )}
         {available.length ? (
           <ul className="wallet-list">
             {available.map((w) => (
@@ -41,6 +70,7 @@ export function WalletPickerProvider({ children }: { children: ReactNode }) {
                   type="button"
                   className="wallet-option t-label"
                   onClick={() => {
+                    setNotice(null);
                     select(w.adapter.name);
                     setOpen(false);
                   }}
