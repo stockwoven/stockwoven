@@ -8,3 +8,4 @@ test-ledger
 .surfpool
 programs/stockwoven/tests/fixtures/*.so
 scripts/keeper-state.json
+.claude/settings.local.json
