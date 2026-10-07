@@ -1,5 +1,4 @@
 import { PoweredBy } from "@/components/ds";
-import { Todo } from "@/components/docs/Todo";
 
 # For partners.
 
@@ -7,9 +6,9 @@ Inside a neobank's app, the neobank's brand leads. Stockwoven stays small and co
 
 ## Integration
 
-The vault program is open: deposit and redeem are plain Solana instructions, and conversions go straight to the Meteora pool, so any router can fill them. The account order is in the app's client (`app/src/lib/stockwoven.ts`).
+The vault program is open: deposit and redeem are plain Solana instructions, and swaps go straight to the Meteora pools, so any router can fill them. Your customers can pay with USDC and get USDC back: the swaps into and out of the vault's mix run in the same transaction as the deposit or redemption. The account order is in the app's client (`app/src/lib/stockwoven.ts`).
 
-<Todo>Integration guide, SDK and support contact are not published yet.</Todo>
+The integration guide, SDK and support contact are not published yet.
 
 ## The Powered by badge
 

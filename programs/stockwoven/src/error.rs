@@ -4,6 +4,8 @@ use anchor_lang::prelude::*;
 pub enum ErrorCode {
     #[msg("Only the vault admin can do this")]
     Unauthorized,
+    #[msg("Only the vault keeper can do this")]
+    NotKeeper,
     #[msg("Deposits are paused")]
     DepositsPaused,
     #[msg("Amount must be greater than zero")]
@@ -12,16 +14,42 @@ pub enum ErrorCode {
     InvalidTradeFee,
     #[msg("Compounding share must be between 1 and 10000 bps")]
     InvalidCompoundingFee,
-    #[msg("Liquidity per share must be greater than zero")]
-    InvalidLiquidityPerShare,
-    #[msg("Seed liquidity does not cover a single share")]
-    SeedTooSmall,
+    #[msg("Arbitrage fee is above the maximum")]
+    InvalidArbFee,
+    #[msg("Weight is above 10000 bps")]
+    InvalidWeight,
+    #[msg("The first pool must mint seed shares; later pools must not")]
+    InvalidSeedShares,
     #[msg("Pool address does not match the cp-amm customizable pool for these mints")]
     InvalidPool,
+    #[msg("The vault already holds the maximum number of assets")]
+    TooManyAssets,
+    #[msg("The vault already holds the maximum number of pools")]
+    TooManyPools,
+    #[msg("This mint is already a vault asset")]
+    AssetExists,
+    #[msg("This mint is not a vault asset")]
+    UnknownAsset,
+    #[msg("No vault pool at this index")]
+    UnknownPool,
+    #[msg("An account does not match the vault's records")]
+    AccountMismatch,
+    #[msg("Wrong number of accounts or amounts for this vault")]
+    WrongAccountCount,
+    #[msg("Token account is not owned by the treasury")]
+    NotTreasury,
+    #[msg("The vault has no shares yet")]
+    VaultEmpty,
     #[msg("Math overflow")]
     MathOverflow,
     #[msg("Account is not the expected cp-amm pool or position")]
     InvalidDammAccount,
-    #[msg("The deposit would mint fewer shares than the minimum")]
+    #[msg("Account is not a token account")]
+    InvalidTokenAccount,
+    #[msg("The amounts moved are worse than the limits")]
     SlippageExceeded,
+    #[msg("Arbitrage route must start and end in the same token, with at most 4 hops")]
+    InvalidRoute,
+    #[msg("Arbitrage did not reach the minimum profit")]
+    NotProfitable,
 }

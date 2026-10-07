@@ -1,24 +1,43 @@
 # Supported issuers & assets.
 
-Each stock gets one sw token, backed by every issuer's version. Tickers are the stock ticker with the `sw` prefix: `swINTC`, `swAAPL`.
+Each stock gets one sw token, backed by every issuer's version in the vault's pools. Tickers are the stock ticker with the `sw` prefix: `swSPCX`, `swAAPL`.
 
 ## Assets
 
 | Token | Stock | Issuers in the vault | Status |
 |---|---|---|---|
-| `swINTC` | Intel | xStocks and Backpack (devnet mocks) | Live on devnet |
+| `swSPCX` | SpaceX | xStocks, Backpack and Ondo (devnet mocks) | Live on devnet |
 | `swAAPL` | Apple | — | Not live yet |
 | `swNVDA` | NVIDIA | — | Not live yet |
 | `swTSLA` | Tesla | — | Not live yet |
 
-swINTC is live on devnet. The others are not live yet, so they show no figures.
+swSPCX is live on devnet. The others are not live yet, so they show no figures.
 
-## Issuers
+## Tokens in the swSPCX vault
 
-On devnet, test tokens stand in for INTCx from xStocks (mINTCx) and INTC from Backpack (mINTC).
+| Token | Issuer | Decimals | Mainnet mint (for reference) |
+|---|---|---|---|
+| SPCXx | xStocks | 8 | `Xs3oZwbHvqis4NYcf4YKWmEia2eC84wSiVrcYcTqpH8` |
+| SPCX | Backpack | 6 | `SPCXxcqXj6e5dJDVNovHN8744zkbhM2bYudU45BimGb` |
+| SPCXon | Ondo | 9 | `wzAyQTorWyoVXuJKj2x8EqKEGJpS13z6EWE9z5Aondo` |
+| USDC | — | 6 | — |
+| SOL | — | 9 | — |
 
-**Token-2022 issuer tokens** need Meteora token badges, which INTCx and Backpack INTC already have.
+On devnet, mock tokens with the same symbols and decimals stand in for the three issuers' SpaceX tokens: mock SPCXx, mock SPCX and mock SPCXon. USDC is a test USDC, and SOL is devnet SOL, held by the vault as wrapped SOL.
+
+The issuers' tokens are Token-2022 tokens with extensions that Meteora only accepts with a token badge. SPCXx, Backpack SPCX and SPCXon need a badge on mainnet.
+
+## The four pools
+
+| Pool | Kind |
+|---|---|
+| SPCXx / SPCX | stock–stock |
+| SPCXon / SPCXx | stock–stock |
+| SPCX / USDC | stock–USDC |
+| SPCXx / SOL | stock–SOL |
+
+Each is a full-range Meteora DAMM v2 pool with a 0.30% fee in compounding mode, created and owned by the vault. See [How the vault works](/docs/how-the-vault-works#the-four-pools).
 
 ## One pool per pair
 
-There is one customizable pool per mint pair, ever. On mainnet, check that nobody created INTCx/INTC first, and choose token A/B on purpose: fees accrue in B.
+There is one customizable pool per mint pair, ever. On mainnet, check that nobody created the same pair first, and choose token A/B on purpose: compounding pools charge their fee in token B.

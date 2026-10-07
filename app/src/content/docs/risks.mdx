@@ -1,25 +1,33 @@
-import { Todo } from "@/components/docs/Todo";
-
 # Risks & protections.
 
 ## Issuer powers stay
 
-Pause, freeze and permanent delegate can still halt or drain the pool vaults; the vault cannot prevent that. The scaled-UI multiplier (dividends, splits) shifts the fair raw price, and arbitrage takes that value from LPs. That is why there is a pause and a per-issuer watcher (the Tape).
+SPCXx, SPCX and SPCXon keep their issuers' token powers. Pause, freeze and permanent delegate can halt transfers or drain the pools' token accounts, and the vault cannot prevent that. A frozen token can also block a redemption, because the vault pays out every token in kind. The scaled-UI multiplier (dividends, splits) shifts the fair raw price, and arbitrage takes that value from liquidity providers. That is why there is a deposit pause and a per-issuer watcher (the Tape).
 
 ## Deposit pause
 
 `set_deposits_paused` is the admin's circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open.
 
+## Not 100% SpaceX
+
+Two of the vault's pools pair SpaceX with USDC and with SOL, so swSPCX's value is a mix of SpaceX, USDC and SOL. It follows SpaceX, but not one to one, and SOL's price moves part of it. See [Hold](/docs/hold#what-swspcx-is-exposed-to).
+
+## Divergence loss
+
+All four pools are full range (x·y = k). When the prices of a pool's two tokens move apart, the pool ends up holding more of the one that fell, and the vault's position is worth less than simply holding both. This matters most in the stock/USDC and stock/SOL pools, where prices move most. Fees and arbitrage offset it only when volume is high enough. Capital is also used less efficiently than in a concentrated pool.
+
+## The keeper is trusted, within limits
+
+The keeper chooses sizes and prices for rebalances, reserve swaps and arbitrage. A bad choice can cost holders price impact or fees. What bounds it on-chain:
+
+- it can't mint swSPCX or send tokens outside the vault;
+- `vault_swap` and `rebalance_remove` take minimum amounts that bound the price;
+- an arbitrage cycle only lands if the vault ends with more of the token it started from, and every other reserve ends where it started.
+
 ## No oracle, no donation attack
 
-Deposits and withdrawals are priced by cp-amm's own `L × reserve / L_total` rule, rounding against the user. Only the vault can add liquidity to its position, so tokens sent to the vault do not change what a share is worth.
-
-## Full range
-
-The pool is full range (x·y = k). Capital is used less efficiently than in a concentrated pool. The production path is a DLMM position concentrated at the peg, with a keeper that compounds fees.
+Deposits and redemptions are priced by cp-amm's own `L × reserve / L_total` rule and plain fractions of the reserves, rounding against the user. Only the vault can add liquidity to its positions.
 
 ## Devnet only
 
-Everything here runs on Solana devnet with test tokens. Nothing uses real funds.
-
-<Todo>Audit status and a disclosure policy are not published yet.</Todo>
+Everything here runs on Solana devnet with mock tokens. Nothing uses real funds. Audit status and a disclosure policy are not published yet.

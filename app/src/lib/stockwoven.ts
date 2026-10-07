@@ -1,11 +1,18 @@
-// Client for the Stockwoven vault on devnet: instruction builders, pool reads and quotes.
-// Account order mirrors programs/stockwoven/src/instructions/*.rs.
+// Client for the swSPCX vault on devnet: addresses, instruction builders, state reads, prices,
+// quotes and the one-token routes. Account orders mirror programs/stockwoven/src/instructions/*.rs.
+//
+// One swSPCX is a pro-rata claim on everything the vault holds: its liquidity in each of its
+// Meteora DAMM v2 pools (stock–stock, stock–USDC, stock–SOL) and the idle balance of each reserve.
 
 import { Buffer } from "buffer";
-import { Connection, PublicKey, TransactionInstruction } from "@solana/web3.js";
+import { Connection, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import {
+  NATIVE_MINT,
+  TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
+  createCloseAccountInstruction,
+  createSyncNativeInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import devnet from "./devnet.json";
@@ -15,238 +22,509 @@ const DAMM_POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKm
 const DAMM_EVENT_AUTHORITY = new PublicKey("3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwptYGjHfet");
 
 export const SHARE_DECIMALS = 8;
-export const TRADE_FEE_BPS = 10;
-export const COMPOUNDING_FEE_BPS = 8_000;
-/** Vault fee on single-token deposits (ZAP_FEE_BPS): kept in the position, no shares minted for it. */
-export const ZAP_FEE_BPS = 5;
+/** Share of each pool fee that compounds for holders: 80% of the LP fee, after Meteora's 20%. */
+export const HOLDERS_FEE_PCT = 64;
+export const PROTOCOL_FEE_PCT = 16;
+export const METEORA_FEE_PCT = 20;
+
+export type AssetKind = "stock" | "usdc" | "sol";
+
+export type Asset = {
+  symbol: string;
+  name: string;
+  issuer: string | null;
+  kind: AssetKind;
+  mint: PublicKey;
+  decimals: number;
+  tokenProgram: PublicKey;
+  reserve: PublicKey;
+};
+
+export type PoolKind = "stock-stock" | "stock-usdc" | "stock-sol" | "sol-usdc" | "market";
+
+export type Pool = {
+  label: string;
+  kind: PoolKind;
+  pool: PublicKey;
+  tokenAVault: PublicKey;
+  tokenBVault: PublicKey;
+  /** Indexes into ASSETS. */
+  a: number;
+  b: number;
+  feeBps: number;
+  /** Only the vault's own pools have a position. */
+  position?: PublicKey;
+  positionNftAccount?: PublicKey;
+  vault: boolean;
+};
+
+const pk = (s: string) => new PublicKey(s);
+
+export const ASSETS: Asset[] = devnet.assets.map((a) => ({
+  symbol: a.symbol,
+  name: a.name,
+  issuer: a.issuer,
+  kind: a.kind as AssetKind,
+  mint: pk(a.mint),
+  decimals: a.decimals,
+  tokenProgram: pk(a.tokenProgram),
+  reserve: pk(a.reserve),
+}));
+
+type PoolJson = (typeof devnet.pools)[number] | (typeof devnet.marketPools)[number];
+const toPool = (p: PoolJson, vault: boolean): Pool => ({
+  label: p.label,
+  kind: p.kind as PoolKind,
+  pool: pk(p.pool),
+  tokenAVault: pk(p.tokenAVault),
+  tokenBVault: pk(p.tokenBVault),
+  a: p.a,
+  b: p.b,
+  feeBps: p.feeBps,
+  position: "position" in p && p.position ? pk(p.position) : undefined,
+  positionNftAccount: "positionNftAccount" in p && p.positionNftAccount ? pk(p.positionNftAccount) : undefined,
+  vault,
+});
+
+/** The vault's own pools, in the vault's order. */
+export const POOLS: Pool[] = devnet.pools.map((p) => toPool(p, true));
+/** Pools other LPs own on mainnet; the keeper arbitrages against them and routes can use them. */
+export const MARKET_POOLS: Pool[] = devnet.marketPools.map((p) => toPool(p, false));
+export const ALL_POOLS = [...POOLS, ...MARKET_POOLS];
 
 export const VAULT = {
-  program: new PublicKey(devnet.program),
-  mintA: new PublicKey(devnet.mintA),
-  mintB: new PublicKey(devnet.mintB),
-  decimalsA: devnet.decimalsA,
-  decimalsB: devnet.decimalsB,
-  pool: new PublicKey(devnet.pool),
-  vault: new PublicKey(devnet.vault),
-  shareMint: new PublicKey(devnet.shareMint),
-  position: new PublicKey(devnet.position),
-  positionNftAccount: new PublicKey(devnet.positionNftAccount),
-  tokenAVault: new PublicKey(devnet.tokenAVault),
-  tokenBVault: new PublicKey(devnet.tokenBVault),
-  reserveA: new PublicKey(devnet.reserveA),
-  reserveB: new PublicKey(devnet.reserveB),
-  treasury: new PublicKey(devnet.treasury),
-  liquidityPerShare: BigInt(devnet.liquidityPerShare),
+  program: pk(devnet.program),
+  stock: devnet.stock,
+  vault: pk(devnet.vault),
+  shareMint: pk(devnet.shareMint),
+  treasury: pk(devnet.treasury),
+  keeper: pk(devnet.keeper),
+  arbFeeBps: devnet.arbFeeBps,
+  lookupTable: devnet.lookupTable ? pk(devnet.lookupTable) : null,
+  /** USD value of one swSPCX when the vault launched. */
+  launchUsdPerShare: devnet.launch.stockUsd,
 };
+
+export const USDC = ASSETS.findIndex((a) => a.kind === "usdc");
+export const SOL = ASSETS.findIndex((a) => a.kind === "sol");
+
+// ---- encoding -------------------------------------------------------------------------------
 
 const DISC = {
   deposit: [242, 35, 198, 137, 82, 225, 242, 182],
-  depositSingle: [116, 81, 213, 110, 17, 83, 209, 188],
   redeem: [184, 12, 86, 149, 70, 196, 97, 225],
   harvest: [228, 241, 31, 182, 53, 169, 59, 199],
   swap: [248, 198, 158, 145, 225, 117, 135, 200],
 };
 
-const u64 = (v: bigint) => {
-  const b = Buffer.alloc(8);
-  b.writeBigUInt64LE(v);
-  return b;
-};
+const u8 = (v: number) => Buffer.from([v]);
+const u32 = (v: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; };
+const u64 = (v: bigint) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(v); return b; };
+const vecU64 = (xs: bigint[]) => Buffer.concat([u32(xs.length), ...xs.map(u64)]);
 const w = (pubkey: PublicKey, isSigner = false) => ({ pubkey, isSigner, isWritable: true });
 const r = (pubkey: PublicKey, isSigner = false) => ({ pubkey, isSigner, isWritable: false });
-const data = (disc: number[], ...args: bigint[]) => Buffer.concat([Buffer.from(disc), ...args.map(u64)]);
 const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
 
-export const ata = (owner: PublicKey, mint: PublicKey) => getAssociatedTokenAddressSync(mint, owner);
+export const ata = (owner: PublicKey, mint: PublicKey, program = TOKEN_PROGRAM_ID) => getAssociatedTokenAddressSync(mint, owner, true, program);
+export const assetAccount = (owner: PublicKey, k: number) => ata(owner, ASSETS[k].mint, ASSETS[k].tokenProgram);
 
-/** Creates the user's A, B and share accounts if they don't exist yet. */
-export function ensureAccountsIxs(user: PublicKey): TransactionInstruction[] {
-  return [VAULT.mintA, VAULT.mintB, VAULT.shareMint].map((mint) =>
-    createAssociatedTokenAccountIdempotentInstruction(user, ata(user, mint), user, mint),
-  );
+/**
+ * Creates the wallet's account for every vault asset and for swSPCX. `exists` (one flag per asset,
+ * then swSPCX) skips the ones already open, which keeps the transaction small.
+ */
+export function ensureAccountsIxs(user: PublicKey, exists: boolean[] = []): TransactionInstruction[] {
+  const mints = [...ASSETS.map((a) => ({ mint: a.mint, program: a.tokenProgram })), { mint: VAULT.shareMint, program: TOKEN_PROGRAM_ID }];
+  return mints
+    .filter((_, i) => !exists[i])
+    .map(({ mint, program }) => createAssociatedTokenAccountIdempotentInstruction(user, ata(user, mint, program), user, mint, program));
 }
 
-export function depositIx(user: PublicKey, shares: bigint, maxA: bigint, maxB: bigint) {
+/** Fixed accounts of `deposit` / `redeem`, then one group per asset and one per pool. */
+function holderKeys(user: PublicKey) {
+  return [
+    r(user, true), r(VAULT.vault), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)), r(DAMM_POOL_AUTHORITY),
+    r(DAMM_EVENT_AUTHORITY), r(CP_AMM), r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+    ...ASSETS.flatMap((a, k) => [w(assetAccount(user, k)), w(a.reserve), r(a.mint)]),
+    ...POOLS.flatMap((p) => [w(p.pool), w(p.position!), r(p.positionNftAccount!), w(p.tokenAVault), w(p.tokenBVault)]),
+  ];
+}
+
+export function depositIx(user: PublicKey, shares: bigint, maxAmounts: bigint[]) {
   return new TransactionInstruction({
     programId: VAULT.program,
-    data: data(DISC.deposit, shares, maxA, maxB),
+    data: Buffer.concat([Buffer.from(DISC.deposit), u64(shares), vecU64(maxAmounts)]),
+    keys: holderKeys(user),
+  });
+}
+
+export function redeemIx(user: PublicKey, shares: bigint, minAmounts: bigint[]) {
+  return new TransactionInstruction({
+    programId: VAULT.program,
+    data: Buffer.concat([Buffer.from(DISC.redeem), u64(shares), vecU64(minAmounts)]),
+    keys: holderKeys(user),
+  });
+}
+
+/** Permissionless: sends pool `index`'s claimable fee (the protocol's cut) to the treasury. */
+export function harvestIx(caller: PublicKey, index: number) {
+  const p = POOLS[index];
+  const [a, b] = [ASSETS[p.a], ASSETS[p.b]];
+  return new TransactionInstruction({
+    programId: VAULT.program,
+    data: Buffer.concat([Buffer.from(DISC.harvest), u8(index)]),
     keys: [
-      r(user, true), r(VAULT.vault), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)),
-      w(ata(user, VAULT.mintA)), w(ata(user, VAULT.mintB)), w(VAULT.reserveA), w(VAULT.reserveB),
-      r(VAULT.mintA), r(VAULT.mintB), w(VAULT.pool), w(VAULT.position), r(VAULT.positionNftAccount),
-      w(VAULT.tokenAVault), w(VAULT.tokenBVault), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
-      r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+      r(caller, true), r(VAULT.vault), w(p.pool), w(p.position!), r(p.positionNftAccount!), w(p.tokenAVault), w(p.tokenBVault),
+      w(a.reserve), w(ata(VAULT.treasury, b.mint, b.tokenProgram)), r(a.mint), r(b.mint),
+      r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM), r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID),
     ],
   });
 }
 
-/** Deposits one issuer's token: the vault swaps the right part of it and adds both as liquidity. */
-export function depositSingleIx(user: PublicKey, inputIsA: boolean, amountIn: bigint, minShares: bigint) {
-  return new TransactionInstruction({
-    programId: VAULT.program,
-    data: Buffer.concat([Buffer.from(DISC.depositSingle), Buffer.from([inputIsA ? 1 : 0]), u64(amountIn), u64(minShares)]),
-    keys: [
-      r(user, true), r(VAULT.vault), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)),
-      w(ata(user, VAULT.mintA)), w(ata(user, VAULT.mintB)), w(VAULT.reserveA), w(VAULT.reserveB),
-      r(VAULT.mintA), r(VAULT.mintB), w(VAULT.pool), w(VAULT.position), r(VAULT.positionNftAccount),
-      w(VAULT.tokenAVault), w(VAULT.tokenBVault), r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
-      r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
-    ],
-  });
-}
-
-export function redeemIx(user: PublicKey, shares: bigint, minA: bigint, minB: bigint) {
-  return new TransactionInstruction({
-    programId: VAULT.program,
-    data: data(DISC.redeem, shares, minA, minB),
-    keys: [
-      r(user, true), r(VAULT.vault), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)),
-      w(ata(user, VAULT.mintA)), w(ata(user, VAULT.mintB)), r(VAULT.mintA), r(VAULT.mintB),
-      w(VAULT.pool), w(VAULT.position), r(VAULT.positionNftAccount), w(VAULT.tokenAVault), w(VAULT.tokenBVault),
-      r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
-      r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
-    ],
-  });
-}
-
-export function harvestIx() {
-  return new TransactionInstruction({
-    programId: VAULT.program,
-    data: Buffer.from(DISC.harvest),
-    keys: [
-      r(VAULT.vault), w(VAULT.reserveA), w(VAULT.treasury), r(VAULT.mintA), r(VAULT.mintB), r(VAULT.pool),
-      w(VAULT.position), r(VAULT.positionNftAccount), w(VAULT.tokenAVault), w(VAULT.tokenBVault),
-      r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
-    ],
-  });
-}
-
-/** The accounts of any cp-amm pool a swap goes through. */
-export type DammPool = { pool: PublicKey; tokenAVault: PublicKey; tokenBVault: PublicKey; mintA: PublicKey; mintB: PublicKey };
-
-/** A swap on any cp-amm pool, from the user's `input` token account to `output`. */
-export function poolSwapIx(p: DammPool, user: PublicKey, input: PublicKey, output: PublicKey, amountIn: bigint, minOut: bigint) {
+/** A swap on any cp-amm pool, between the wallet's two token accounts. */
+export function poolSwapIx(p: Pool, user: PublicKey, aToB: boolean, amountIn: bigint, minOut: bigint) {
+  const [ua, ub] = [assetAccount(user, p.a), assetAccount(user, p.b)];
+  const [input, output] = aToB ? [ua, ub] : [ub, ua];
   return new TransactionInstruction({
     programId: CP_AMM,
-    data: data(DISC.swap, amountIn, minOut),
+    data: Buffer.concat([Buffer.from(DISC.swap), u64(amountIn), u64(minOut)]),
     keys: [
       r(DAMM_POOL_AUTHORITY), w(p.pool), w(input), w(output), w(p.tokenAVault), w(p.tokenBVault),
-      r(p.mintA), r(p.mintB), r(user, true), r(TOKEN_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+      r(ASSETS[p.a].mint), r(ASSETS[p.b].mint), r(user, true), r(ASSETS[p.a].tokenProgram), r(ASSETS[p.b].tokenProgram),
       r(CP_AMM), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
     ],
   });
 }
 
-/** A direct DAMM v2 swap between the two issuers' tokens; the vault program is not involved. */
-export function swapIx(user: PublicKey, aToB: boolean, amountIn: bigint, minOut: bigint) {
-  const [input, output] = aToB
-    ? [ata(user, VAULT.mintA), ata(user, VAULT.mintB)]
-    : [ata(user, VAULT.mintB), ata(user, VAULT.mintA)];
-  return poolSwapIx(VAULT, user, input, output, amountIn, minOut);
+/** Wraps `lamports` of SOL into the wallet's wSOL account. */
+export function wrapSolIxs(user: PublicKey, lamports: bigint) {
+  const wsol = ata(user, NATIVE_MINT);
+  return [SystemProgram.transfer({ fromPubkey: user, toPubkey: wsol, lamports }), createSyncNativeInstruction(wsol)];
 }
 
-export type Reserves = { reserveA: bigint; reserveB: bigint };
+/** Closes the wallet's wSOL account, returning every wSOL in it (and its rent) as SOL. */
+export const unwrapSolIx = (user: PublicKey) => createCloseAccountInstruction(ata(user, NATIVE_MINT), user, user);
 
-/**
- * `vaultLiquidity` is the vault position's liquidity: every swINTC is a pro-rata claim on it.
- * `routes` holds the stock/USDC pools of the routed single-token deposit, when they exist.
- */
-export type PoolState = Reserves & {
-  liquidity: bigint;
-  vaultLiquidity: bigint;
-  routes?: { a: Reserves; b: Reserves; sol?: Reserves };
+// ---- state ----------------------------------------------------------------------------------
+
+export type PoolState = { liquidity: bigint; reserveA: bigint; reserveB: bigint };
+
+export type VaultState = {
+  supply: bigint;
+  /** Idle balance of each reserve, per asset. */
+  reserves: bigint[];
+  /** The vault's pools, with the vault's position liquidity. */
+  pools: (PoolState & { position: bigint })[];
+  market: PoolState[];
+  /** Target weight per vault pool, in basis points. */
+  weights: number[];
+  depositsPaused: boolean;
 };
 
 const u128 = (d: Buffer, offset: number) => d.readBigUInt64LE(offset) + (d.readBigUInt64LE(offset + 8) << 64n);
-const reserves = (d: Buffer): Reserves => ({ reserveA: d.readBigUInt64LE(680), reserveB: d.readBigUInt64LE(688) });
+const poolOf = (d: Buffer): PoolState => ({ liquidity: u128(d, 360), reserveA: d.readBigUInt64LE(680), reserveB: d.readBigUInt64LE(688) });
 
-/** Reads cp-amm's Pool, the vault's Position and any route pools (offsets include the 8-byte discriminator). */
-export async function fetchPool(conn: Connection): Promise<PoolState> {
-  const routePools = [devnet.usdcRoutes?.a.pool, devnet.usdcRoutes?.b.pool, devnet.solRoute?.pool]
-    .filter((k): k is string => !!k)
-    .map((k) => new PublicKey(k));
-  const [pool, position, routeA, routeB, routeSol] = await conn.getMultipleAccountsInfo([VAULT.pool, VAULT.position, ...routePools]);
-  if (!pool || !position) throw new Error("pool not found");
-  const d = Buffer.from(pool.data);
-  const read = (info: typeof pool) => reserves(Buffer.from(info.data));
+// Vault account layout: 8-byte discriminator, admin/keeper/treasury, stock, share mint,
+// arb_fee_bps, deposits_paused, bump, num_assets, 6 assets of 97 bytes, num_pools, 6 pools of 164.
+const PAUSED_OFFSET = 8 + 96 + 8 + 32 + 2;
+const POOLS_OFFSET = PAUSED_OFFSET + 1 + 1 + 1 + 6 * 97 + 1;
+
+/** Reads the vault, its share mint, reserves, pools and positions, and the market pools in one call. */
+export async function fetchVaultState(conn: Connection): Promise<VaultState> {
+  const keys = [
+    VAULT.vault, VAULT.shareMint,
+    ...ASSETS.map((a) => a.reserve),
+    ...POOLS.flatMap((p) => [p.pool, p.position!]),
+    ...MARKET_POOLS.map((p) => p.pool),
+  ];
+  const infos = await conn.getMultipleAccountsInfo(keys);
+  const data = infos.map((i) => (i ? Buffer.from(i.data) : null));
+  if (!data[0] || !data[1]) throw new Error("vault not found");
+  let k = 2;
+  const reserves = ASSETS.map(() => data[k++]?.readBigUInt64LE(64) ?? 0n);
+  const pools = POOLS.map(() => {
+    const pool = data[k++];
+    const position = data[k++];
+    if (!pool || !position) throw new Error("vault pool not found");
+    return { ...poolOf(pool), position: u128(position, 152) };
+  });
+  const market = MARKET_POOLS.map(() => {
+    const d = data[k++];
+    return d ? poolOf(d) : { liquidity: 0n, reserveA: 0n, reserveB: 0n };
+  });
   return {
-    liquidity: u128(d, 360),
-    ...reserves(d),
-    vaultLiquidity: u128(Buffer.from(position.data), 152),
-    routes: routeA && routeB ? { a: read(routeA), b: read(routeB), sol: routeSol ? read(routeSol) : undefined } : undefined,
+    supply: data[1].readBigUInt64LE(36),
+    reserves,
+    pools,
+    market,
+    weights: POOLS.map((_, i) => data[0]!.readUInt16LE(POOLS_OFFSET + i * 164 + 162)),
+    depositsPaused: data[0][PAUSED_OFFSET] === 1,
   };
 }
 
-/** Liquidity behind one raw share unit, rounded as the program does. An empty vault uses the launch ratio. */
-function liquidityPerShare(pool: PoolState, supply: bigint, roundUp: boolean) {
-  if (supply === 0n) return VAULT.liquidityPerShare;
-  return roundUp ? ceilDiv(pool.vaultLiquidity, supply) : pool.vaultLiquidity / supply;
-}
+const poolStates = (s: VaultState): PoolState[] => [...s.pools, ...s.market];
 
-/** One token of either issuer counts as one share of stock. */
-export const stockValue = (a: bigint, b: bigint) =>
-  Number(a) / 10 ** VAULT.decimalsA + Number(b) / 10 ** VAULT.decimalsB;
-
-/** Shares of stock behind one whole swINTC. */
-export function navPerShare(pool: PoolState, supply: bigint) {
-  const l = Number(liquidityPerShare(pool, supply, false) * 10n ** BigInt(SHARE_DECIMALS)) / Number(pool.liquidity);
-  return l * stockValue(pool.reserveA, pool.reserveB);
-}
-
-/** Tokens cp-amm will take for `shares` (it rounds up on deposit, down on redeem). */
-export function quoteShares(pool: PoolState, supply: bigint, shares: bigint, roundUp: boolean) {
-  const dl = shares * liquidityPerShare(pool, supply, roundUp);
-  const div = roundUp ? ceilDiv : (a: bigint, b: bigint) => a / b;
-  return { a: div(dl * pool.reserveA, pool.liquidity), b: div(dl * pool.reserveB, pool.liquidity) };
-}
-
-/** Most shares a deposit of at most `a` and `b` covers, at the vault pool's current reserves. */
-export function sharesFor(pool: PoolState, supply: bigint, a: bigint, b: bigint) {
-  const dlA = (a * pool.liquidity) / pool.reserveA;
-  const dlB = (b * pool.liquidity) / pool.reserveB;
-  return (dlA < dlB ? dlA : dlB) / liquidityPerShare(pool, supply, true);
-}
+// ---- prices and value -----------------------------------------------------------------------
 
 /**
- * x·y = k quote on any compounding cp-amm pool with TRADE_FEE_BPS. The fee is charged in token B:
- * on output for A→B, on input for B→A.
+ * USD per whole token of each asset, read outward from USDC = 1. Each step prices one more asset
+ * from the pool, among those pairing it with an already-priced asset, that holds the most USD on
+ * its priced side, so thin pools never set a price a deep one disagrees with.
  */
-export function quoteSwap(pool: Reserves, aToB: boolean, amountIn: bigint) {
-  const fee = (x: bigint) => (x * BigInt(TRADE_FEE_BPS)) / 10_000n;
+export function prices(s: VaultState): number[] {
+  const states = poolStates(s);
+  const usd: (number | undefined)[] = ASSETS.map((a) => (a.kind === "usdc" ? 1 : undefined));
+  for (;;) {
+    let best: { k: number; price: number; depth: number } | null = null;
+    ALL_POOLS.forEach((p, i) => {
+      const st = states[i];
+      if (st.reserveA === 0n || st.reserveB === 0n) return;
+      const [wa, wb] = [whole(st.reserveA, p.a), whole(st.reserveB, p.b)];
+      if (usd[p.a] === undefined && usd[p.b] !== undefined && (!best || wb * usd[p.b]! > best.depth)) {
+        best = { k: p.a, price: (wb / wa) * usd[p.b]!, depth: wb * usd[p.b]! };
+      }
+      if (usd[p.b] === undefined && usd[p.a] !== undefined && (!best || wa * usd[p.a]! > best.depth)) {
+        best = { k: p.b, price: (wa / wb) * usd[p.a]!, depth: wa * usd[p.a]! };
+      }
+    });
+    if (!best) break;
+    const found: { k: number; price: number } = best;
+    usd[found.k] = found.price;
+  }
+  return usd.map((x) => x ?? 0);
+}
+
+export const whole = (raw: bigint, k: number) => Number(raw) / 10 ** ASSETS[k].decimals;
+export const usdOf = (amounts: bigint[], px: number[]) => amounts.reduce((sum, x, k) => sum + whole(x, k) * px[k], 0);
+
+/** Raw amounts behind the vault's position in pool `i`. */
+export function positionAmounts(s: VaultState, i: number) {
+  const p = s.pools[i];
+  if (p.liquidity === 0n) return { a: 0n, b: 0n };
+  return { a: (p.reserveA * p.position) / p.liquidity, b: (p.reserveB * p.position) / p.liquidity };
+}
+
+/** Everything the vault holds, per asset: its positions plus the idle reserves. */
+export function holdings(s: VaultState) {
+  const out = [...s.reserves];
+  POOLS.forEach((p, i) => {
+    const { a, b } = positionAmounts(s, i);
+    out[p.a] += a;
+    out[p.b] += b;
+  });
+  return out;
+}
+
+export function poolValue(s: VaultState, px: number[], i: number) {
+  const { a, b } = positionAmounts(s, i);
+  return whole(a, POOLS[i].a) * px[POOLS[i].a] + whole(b, POOLS[i].b) * px[POOLS[i].b];
+}
+
+/** USD value of the whole vault and of one swSPCX. */
+export function vaultValue(s: VaultState) {
+  const px = prices(s);
+  const total = usdOf(holdings(s), px);
+  const perShare = s.supply > 0n ? (total / Number(s.supply)) * 10 ** SHARE_DECIMALS : 0;
+  return { px, total, perShare };
+}
+
+/** Share of the vault's value in SpaceX tokens, USDC and SOL. */
+export function exposure(s: VaultState) {
+  const px = prices(s);
+  const h = holdings(s);
+  const total = usdOf(h, px) || 1;
+  const by = (kind: AssetKind) => ASSETS.reduce((sum, a, k) => sum + (a.kind === kind ? whole(h[k], k) * px[k] : 0), 0) / total;
+  return { stock: by("stock"), usdc: by("usdc"), sol: by("sol") };
+}
+
+// ---- quotes ---------------------------------------------------------------------------------
+
+/**
+ * Tokens the program moves for `shares`, per asset, with its rounding: liquidity per share is
+ * rounded up on deposit (down on redeem), cp-amm rounds the amounts it pulls up (pays down), and
+ * the idle slice is rounded the same way.
+ */
+export function quoteShares(s: VaultState, shares: bigint, deposit: boolean): bigint[] {
+  if (s.supply === 0n) return ASSETS.map(() => 0n);
+  const div = deposit ? ceilDiv : (a: bigint, b: bigint) => a / b;
+  const out = s.reserves.map((x) => div(shares * x, s.supply));
+  POOLS.forEach((p, i) => {
+    const st = s.pools[i];
+    const perShare = deposit ? ceilDiv(st.position, s.supply) : st.position / s.supply;
+    const dl = perShare * shares;
+    if (dl === 0n || st.liquidity === 0n) return;
+    out[p.a] += div(dl * st.reserveA, st.liquidity);
+    out[p.b] += div(dl * st.reserveB, st.liquidity);
+  });
+  return out;
+}
+
+/** The most shares the given amounts pay for, at the given state. */
+export function sharesFor(s: VaultState, amounts: bigint[]) {
+  if (s.supply === 0n) return 0n;
+  const h = holdings(s);
+  let hi = 0n;
+  ASSETS.forEach((_, k) => {
+    if (h[k] === 0n) return;
+    const bound = (amounts[k] * s.supply) / h[k] + 1n;
+    hi = hi === 0n || bound < hi ? bound : hi;
+  });
+  let lo = 0n;
+  while (lo < hi) {
+    const mid = (lo + hi + 1n) / 2n;
+    const need = quoteShares(s, mid, true);
+    if (need.every((x, k) => x <= amounts[k])) lo = mid;
+    else hi = mid - 1n;
+  }
+  return lo;
+}
+
+/** x·y = k with the pool's fee, charged in token B: on output for A→B, on input for B→A. */
+export function quoteSwap(st: PoolState, feeBps: number, aToB: boolean, amountIn: bigint) {
+  if (amountIn <= 0n || st.reserveA === 0n || st.reserveB === 0n) return 0n;
+  const fee = (x: bigint) => (x * BigInt(feeBps)) / 10_000n;
   if (aToB) {
-    const gross = (pool.reserveB * amountIn) / (pool.reserveA + amountIn);
+    const gross = (st.reserveB * amountIn) / (st.reserveA + amountIn);
     return gross - fee(gross);
   }
   const net = amountIn - fee(amountIn);
-  return (pool.reserveA * net) / (pool.reserveB + net);
+  return (st.reserveA * net) / (st.reserveB + net);
 }
 
-const isqrt = (n: bigint) => {
-  if (n < 2n) return n;
-  let x0 = n / 2n + 1n;
-  let x1 = (x0 + n / x0) / 2n;
-  while (x1 < x0) [x0, x1] = [x1, (x1 + n / x1) / 2n];
-  return x0;
+export type Hop = { pool: Pool; index: number; aToB: boolean };
+export type Route = { hops: Hop[]; amountIn: bigint; out: bigint };
+
+/** Applies a swap to a copy of the pool states, so later quotes see its price impact. */
+function applySwap(states: PoolState[], hop: Hop, amountIn: bigint, out: bigint) {
+  const st = { ...states[hop.index] };
+  if (hop.aToB) {
+    st.reserveA += amountIn;
+    st.reserveB -= out;
+  } else {
+    st.reserveB += amountIn;
+    st.reserveA -= out;
+  }
+  states[hop.index] = st;
+}
+
+/** The best route of 1 or 2 hops from asset `from` to asset `to` across every pool. */
+export function bestRoute(states: PoolState[], from: number, to: number, amountIn: bigint): Route | null {
+  const hopsFrom = (k: number) =>
+    ALL_POOLS.flatMap((pool, index): Hop[] => (pool.a === k ? [{ pool, index, aToB: true }] : pool.b === k ? [{ pool, index, aToB: false }] : []));
+  const target = (h: Hop) => (h.aToB ? h.pool.b : h.pool.a);
+  const run = (hops: Hop[]) => hops.reduce((x, h) => quoteSwap(states[h.index], h.pool.feeBps, h.aToB, x), amountIn);
+  let best: Route | null = null;
+  for (const h1 of hopsFrom(from)) {
+    const mid = target(h1);
+    const candidates = mid === to ? [[h1]] : hopsFrom(mid).filter((h2) => h2.index !== h1.index && target(h2) === to).map((h2) => [h1, h2]);
+    for (const hops of candidates) {
+      const out = run(hops);
+      if (out > 0n && (!best || out > best.out)) best = { hops, amountIn, out };
+    }
+  }
+  return best;
+}
+
+/** Each swap in a one-token route keeps this much below its quote; the deposit is sized on the minimums. */
+export const ROUTE_SLIPPAGE_BPS = 50n;
+const minOf = (x: bigint) => (x * (10_000n - ROUTE_SLIPPAGE_BPS)) / 10_000n;
+
+export type Swap = { pool: Pool; aToB: boolean; amountIn: bigint; minOut: bigint };
+
+export type ZapQuote = {
+  input: number;
+  amountIn: bigint;
+  /** Swaps from the input into each other asset, in order. */
+  swaps: Swap[];
+  /** The deposit: the most it may take of each asset, and the shares it mints. */
+  maxAmounts: bigint[];
+  shares: bigint;
+  /** USD value of the input and of the shares at the vault's value per share. */
+  usdIn: number;
+  usdOut: number;
 };
 
 /**
- * Mirrors deposit_single: swap `sqrt(r · (r + a)) − r` of the input, add the most liquidity both
- * balances cover, and mint shares for all but the vault fee. The post-swap reserves leave out the
- * compounded part of the swap fee, so the quote reads very slightly low.
+ * Pays for a deposit with one asset: splits `amountIn` across the vault's assets by their share
+ * of its value, buys each through its best route (simulating each swap's price impact on the
+ * pools that follow, including the vault's own), and sizes the deposit on the minimum fills.
  */
-export function quoteDepositSingle(pool: PoolState, supply: bigint, inputIsA: boolean, amountIn: bigint) {
-  const reserveIn = inputIsA ? pool.reserveA : pool.reserveB;
-  const swapped = isqrt(reserveIn * (reserveIn + amountIn)) - reserveIn;
-  const out = swapped > 0n ? quoteSwap(pool, inputIsA, swapped) : 0n;
-  const [a, b] = inputIsA ? [amountIn - swapped, out] : [out, amountIn - swapped];
-  const reserveA = inputIsA ? pool.reserveA + swapped : pool.reserveA - out;
-  const reserveB = inputIsA ? pool.reserveB - out : pool.reserveB + swapped;
-  if (reserveA <= 0n || reserveB <= 0n) return null;
-  const dlA = (a * pool.liquidity) / reserveA;
-  const dlB = (b * pool.liquidity) / reserveB;
-  const forHolder = ((dlA < dlB ? dlA : dlB) * BigInt(10_000 - ZAP_FEE_BPS)) / 10_000n;
-  return forHolder / liquidityPerShare(pool, supply, true);
+export function quoteZapIn(s: VaultState, input: number, amountIn: bigint): ZapQuote | null {
+  if (amountIn <= 0n || s.supply === 0n) return null;
+  const { px, perShare } = vaultValue(s);
+  const h = holdings(s);
+  const values = h.map((x, k) => whole(x, k) * px[k]);
+  const total = values.reduce((a, b) => a + b, 0);
+  if (total === 0) return null;
+
+  const states = poolStates(s);
+  const swaps: Swap[] = [];
+  const amounts = ASSETS.map(() => 0n);
+  let spent = 0n;
+  ASSETS.forEach((_, k) => {
+    if (k === input || values[k] === 0) return;
+    const slice = (amountIn * BigInt(Math.floor((values[k] / total) * 1e9))) / 1_000_000_000n;
+    if (slice === 0n) return;
+    const route = bestRoute(states, input, k, slice);
+    if (!route) return;
+    let x = slice;
+    for (const hop of route.hops) {
+      const out = quoteSwap(states[hop.index], hop.pool.feeBps, hop.aToB, x);
+      const min = minOf(out);
+      swaps.push({ pool: hop.pool, aToB: hop.aToB, amountIn: x, minOut: min });
+      applySwap(states, hop, x, out);
+      x = min;
+    }
+    amounts[k] = x;
+    spent += slice;
+  });
+  amounts[input] = amountIn - spent;
+
+  // The deposit sees the vault pools after the route's swaps.
+  const after: VaultState = { ...s, pools: s.pools.map((p, i) => ({ ...p, ...states[i] })), market: states.slice(POOLS.length) };
+  const shares = sharesFor(after, amounts);
+  if (shares === 0n) return null;
+  return {
+    input,
+    amountIn,
+    swaps,
+    maxAmounts: amounts,
+    shares,
+    usdIn: whole(amountIn, input) * px[input],
+    usdOut: (Number(shares) / 10 ** SHARE_DECIMALS) * perShare,
+  };
 }
+
+export type ZapOutQuote = { amounts: bigint[]; swaps: Swap[]; out: bigint; usdOut: number };
+
+/** Redeems `shares` in kind, then swaps every asset other than `output` into it. */
+export function quoteZapOut(s: VaultState, shares: bigint, output: number): ZapOutQuote | null {
+  if (shares <= 0n || s.supply === 0n) return null;
+  const amounts = quoteShares(s, shares, false).map(minOf);
+  // After the redeem, the vault pools hold less; swaps run against the reduced reserves.
+  const states = poolStates(s).map((st, i) => {
+    if (i >= POOLS.length) return st;
+    const dl = (s.pools[i].position / s.supply) * shares;
+    return { liquidity: st.liquidity - dl, reserveA: st.reserveA - (dl * st.reserveA) / st.liquidity, reserveB: st.reserveB - (dl * st.reserveB) / st.liquidity };
+  });
+  const swaps: Swap[] = [];
+  let out = amounts[output];
+  amounts.forEach((amount, k) => {
+    if (k === output || amount === 0n) return;
+    const route = bestRoute(states, k, output, amount);
+    if (!route) return;
+    let x = amount;
+    for (const hop of route.hops) {
+      const o = quoteSwap(states[hop.index], hop.pool.feeBps, hop.aToB, x);
+      swaps.push({ pool: hop.pool, aToB: hop.aToB, amountIn: x, minOut: minOf(o) });
+      applySwap(states, hop, x, o);
+      x = minOf(o);
+    }
+    out += x;
+  });
+  return { amounts, swaps, out, usdOut: whole(out, output) * prices(s)[output] };
+}
+
+// ---- formatting -----------------------------------------------------------------------------
 
 export function toRaw(value: string, decimals: number): bigint {
   const [whole, frac = ""] = value.trim().split(".");
@@ -256,6 +534,11 @@ export function toRaw(value: string, decimals: number): bigint {
 
 export const fromRaw = (raw: bigint, decimals: number, digits = 4) =>
   (Number(raw) / 10 ** decimals).toLocaleString("en-US", { maximumFractionDigits: digits });
+
+export const usd = (v: number, digits = 2) =>
+  `$${v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+
+export const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)}%`;
 
 export const explorer = (address: PublicKey | string, kind: "address" | "tx" = "address") =>
   `https://explorer.solana.com/${kind}/${address.toString()}?cluster=devnet`;

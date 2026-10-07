@@ -3,13 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "devnet:setup": "tsx scripts/devnet-setup.ts"
+    "devnet:setup": "tsx scripts/devnet-setup.ts",
+    "keeper": "tsx scripts/keeper.ts",
+    "traffic": "tsx scripts/traffic.ts"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.4",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

@@ -4,37 +4,69 @@ import { LearnMore } from "@/components/LearnMore";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingHeader } from "@/components/landing/LandingHeader";
 import { LINKS } from "@/lib/links";
-import { COMPOUNDING_FEE_BPS, TRADE_FEE_BPS } from "@/lib/stockwoven";
 import "./landing.css";
 
 export const metadata: Metadata = {
   title: "Stockwoven · One stock. One token.",
 };
 
-const ISSUERS = [
-  { token: "INTCx", issuer: "xStocks" },
-  { token: "INTC", issuer: "Backpack" },
+const INPUTS = [
+  { token: "SPCXx", note: "SpaceX, by xStocks" },
+  { token: "SPCX", note: "SpaceX, by Backpack" },
+  { token: "SPCXon", note: "SpaceX, by Ondo" },
+  { token: "USDC · SOL", note: "The other side of two pools" },
 ];
+
+const POOLS = ["SPCXx / SPCX", "SPCXon / SPCXx", "SPCX / USDC", "SPCXx / SOL"];
 
 const STEPS = [
-  { title: "Deposit", text: "Hand over the vault's current mix of both issuers' tokens. Receive swINTC." },
+  {
+    title: "Deposit",
+    text: "Hand over the vault's current mix, or pay with one token (USDC, SOL or any issuer's SpaceX) and the app swaps it into the mix in the same transaction. Receive swSPCX.",
+  },
   {
     title: "Hold",
-    text: "Each swINTC is a pro-rata slice of the vault's liquidity in the pool. Its value is read from the pool account, not from an oracle.",
+    text: "Each swSPCX is a pro-rata slice of everything the vault holds: its liquidity in all four pools plus its idle reserves. No oracle: the value is read from the pool and reserve accounts.",
   },
-  { title: "Redeem", text: "Burn swINTC and take your share of both tokens. The vault never pauses redemptions." },
+  {
+    title: "Redeem",
+    text: "Burn swSPCX and take your slice of every token back, or let the app swap it all to USDC in the same transaction. The vault never pauses redemptions.",
+  },
 ];
 
-// Of each conversion fee: cp-amm keeps 20%, the LP share splits by compounding_fee_bps.
+// Set per pool when the vault creates it (trade_fee_bps, compounding_fee_bps) and per vault for
+// arbitrage (arb_fee_bps). cp-amm keeps 20% of every pool fee; the rest splits by compounding_fee_bps.
+const TRADE_FEE_BPS = 30;
+const COMPOUNDING_FEE_BPS = 8_000;
+const ARB_FEE_BPS = 2_000;
 const HOLDERS = (80 * COMPOUNDING_FEE_BPS) / 10_000;
 const FEE_SPLIT = [
-  { key: "holders", share: HOLDERS, label: "Compounds in the pool for swINTC holders", source: "compounding_fee_bps = 8000" },
-  { key: "treasury", share: 80 - HOLDERS, label: "Claimable by the Stockwoven treasury", source: "harvest" },
+  { key: "holders", share: HOLDERS, label: "Compounds in the pool for swSPCX holders", source: `compounding_fee_bps = ${COMPOUNDING_FEE_BPS}` },
+  { key: "treasury", share: 80 - HOLDERS, label: "Protocol's cut, sent to the treasury", source: "harvest" },
   { key: "meteora", share: 20, label: "Meteora protocol fee", source: "fixed by cp-amm" },
+];
+const ARB_SPLIT = [
+  { key: "holders", share: 100 - ARB_FEE_BPS / 100, label: "Stays in the vault for swSPCX holders", source: "vault reserves" },
+  { key: "treasury", share: ARB_FEE_BPS / 100, label: "Stockwoven treasury", source: `arb_fee_bps = ${ARB_FEE_BPS}` },
+];
+
+const YIELD = [
+  {
+    title: "Pool fees",
+    text: `Traders pay ${(TRADE_FEE_BPS / 100).toFixed(2)}% in every vault pool. Most of it compounds into the pool, so each unit of the vault's liquidity is backed by more tokens. The stock/USDC and stock/SOL pools see far more volume than the stock/stock ones.`,
+  },
+  {
+    title: "Auto-balancing",
+    text: "A keeper bot measures each pool's fee yield and moves the vault's liquidity toward the pools that earn the most, against target weights stored on-chain. It can't mint swSPCX or take funds out of the vault.",
+  },
+  {
+    title: "Arbitrage",
+    text: "When the same SpaceX trades at different prices across pools, the keeper runs a swap cycle of 2 to 4 hops through the vault's pools and market pools. The program only lets it land if the vault ends with more of the token it started from.",
+  },
 ];
 
 const ASSETS = [
-  { ticker: "INTC", stock: "Intel", issuers: "xStocks, Backpack (devnet mocks)", status: "Live on devnet", live: true },
+  { ticker: "SPCX", stock: "SpaceX", issuers: "xStocks, Backpack, Ondo (devnet mocks)", status: "Live on devnet", live: true },
   { ticker: "AAPL", stock: "Apple", issuers: "—", status: "Not live yet" },
   { ticker: "NVDA", stock: "NVIDIA", issuers: "—", status: "Not live yet" },
   { ticker: "TSLA", stock: "Tesla", issuers: "—", status: "Not live yet" },
@@ -42,13 +74,18 @@ const ASSETS = [
 
 const FAQ = [
   {
-    q: "Where does swINTC's growth come from?",
-    a: "From conversions between issuers. Every conversion through the Meteora pool leaves a fee in its reserves, so each swINTC is backed by a little more stock.",
-    href: "/docs/fees",
+    q: "Where does swSPCX's growth come from?",
+    a: "From three sources: trading fees in the vault's four pools, the keeper moving liquidity toward the pools that earn the most, and arbitrage between pools that only lands when the vault ends with more. No return is promised: it depends on trading volume and price gaps.",
+    href: "/docs/fees#where-the-yield-comes-from",
+  },
+  {
+    q: "Is swSPCX 100% SpaceX?",
+    a: "Mostly, not entirely. The vault also holds USDC and SOL inside its stock/USDC and stock/SOL pools, so swSPCX's value is a mix of SpaceX, USDC and SOL. The app shows its USD value as 1 swSPCX = $X.",
+    href: "/docs/hold#how-swspcx-is-valued",
   },
   {
     q: "Is there a price oracle?",
-    a: "No. Meteora's own pool math prices deposits and redemptions, rounding against the user. Only the vault can add liquidity to its position, so tokens sent to the vault don't change what a share is worth.",
+    a: "No. A share is a pro-rata slice of every position and every reserve, and Meteora's own pool math prices the liquidity part, rounding against the user. Only the vault can add liquidity to its positions.",
     href: "/docs/how-the-vault-works#share-accounting",
   },
   {
@@ -57,14 +94,14 @@ const FAQ = [
     href: "/docs/risks",
   },
   {
-    q: "What can the issuers still do?",
-    a: "Issuers keep their token powers: pause, freeze and permanent delegate can halt or drain the pool's vaults, and the vault can't prevent that.",
-    href: "/docs/risks#issuer-powers-stay",
+    q: "What can the keeper do?",
+    a: "Move liquidity between the vault's pools, swap between its reserves and run arbitrage cycles. It is trusted to pick sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage is checked on-chain.",
+    href: "/docs/how-the-vault-works#rebalancing",
   },
   {
-    q: "Can I deposit only one issuer's token?",
-    a: "Yes. Part of it buys the other issuer's token, through USDC pools or the vault's own pool, whichever mints more swINTC. Then both go in.",
-    href: "/docs/deposit#single-token-deposits",
+    q: "What can the issuers still do?",
+    a: "Issuers keep their token powers: pause, freeze and permanent delegate can halt or drain the pools' token accounts, and the vault can't prevent that.",
+    href: "/docs/risks#issuer-powers-stay",
   },
   {
     q: "Is this on mainnet?",
@@ -87,8 +124,8 @@ export default function Landing() {
                 One stock. One token.
               </Display>
               <p className="t-body-lg hero__lead">
-                Stockwoven puts every issuer&apos;s tokenized version of a stock into one Meteora pool and gives your customers a
-                single token for it, like <Ticker ticker="INTC" />, that redeems for its share of the pool.
+                Stockwoven pools every issuer&apos;s tokenized version of a stock in Meteora and gives your customers a single
+                token for it, like <Ticker ticker="SPCX" />, that redeems for its share of everything the vault holds.
               </p>
               <div className="hero__actions">
                 <ButtonLink href="/app">Launch app</ButtonLink>
@@ -109,31 +146,37 @@ export default function Landing() {
                 How it works
               </h2>
               <p className="t-body-lg body">
-                Intel is tokenized by xStocks and by Backpack, and each version trades in its own pool. The vault puts both into
-                one pool and issues <Ticker ticker="INTC" />, one token backed by both.
+                SpaceX is tokenized by xStocks, Backpack and Ondo, and each version trades in its own pools. The vault holds
+                liquidity in four Meteora DAMM v2 pools it owns, plus idle reserves of each token, and issues{" "}
+                <Ticker ticker="SPCX" />, one token for a slice of all of it.
               </p>
             </div>
 
-            <figure className="flow" aria-label="Two issuer tokens go into one Meteora pool, which backs swINTC">
+            <figure className="flow" aria-label="Three issuers' SpaceX tokens, USDC and SOL go into four Meteora pools, which back swSPCX">
               <div className="flow__inputs">
-                {ISSUERS.map((i) => (
+                {INPUTS.map((i) => (
                   <div key={i.token} className="flow__node">
                     <span className="t-data-lg">{i.token}</span>
-                    <span className="t-body muted">Intel, by {i.issuer}</span>
+                    <span className="t-body muted">{i.note}</span>
                   </div>
                 ))}
               </div>
               <FlowArrow />
               <div className="flow__node flow__node--pool">
-                <span className="t-label">Meteora DAMM v2 pool</span>
-                <span className="t-data muted">INTCx ↔ INTC · compounding fees</span>
+                <span className="t-label">Four Meteora DAMM v2 pools + idle reserves</span>
+                {POOLS.map((p) => (
+                  <span key={p} className="t-data muted">
+                    {p}
+                  </span>
+                ))}
+                <span className="t-data muted">compounding fees · keeper rebalances</span>
               </div>
               <FlowArrow />
               <div className="flow__node flow__node--out">
                 <span className="t-data-lg">
-                  <Ticker ticker="INTC" />
+                  <Ticker ticker="SPCX" />
                 </span>
-                <span className="t-body">Redeems for its share of both</span>
+                <span className="t-body">Redeems for its slice of every pool and reserve</span>
               </div>
             </figure>
 
@@ -158,18 +201,22 @@ export default function Landing() {
           <div className="wrap split">
             <div className="section__head">
               <h2 id="fees-title" className="t-heading-md">
-                Where the conversion fee goes
+                Where the yield comes from
               </h2>
-              <p className="t-body-lg body">
-                Every conversion between issuers pays {(TRADE_FEE_BPS / 100).toFixed(2)}%. The pool runs in compounding mode,
-                so most of that fee stays in its reserves and each <Ticker ticker="INTC" /> is backed by a little more stock.
+              {YIELD.map((y) => (
+                <p key={y.title} className="t-body body">
+                  <strong>{y.title}.</strong> <WithTickers>{y.text}</WithTickers>
+                </p>
+              ))}
+              <p className="t-body muted">
+                Every parameter on the right is set in the program and readable on-chain. No yield is promised: it depends on
+                trading volume and price gaps.
               </p>
-              <p className="t-body muted">Set in the program and readable on-chain. No yield is promised: it depends on conversion volume.</p>
-              <LearnMore href="/docs/fees" label="Fees in detail" />
+              <LearnMore href="/docs/fees#where-the-yield-comes-from" label="Fees in detail" />
             </div>
             <div className="tile fees">
               <div className="tile__head">
-                <span className="t-label">Each {(TRADE_FEE_BPS / 100).toFixed(2)}% conversion fee</span>
+                <span className="t-label">Each {(TRADE_FEE_BPS / 100).toFixed(2)}% pool fee</span>
                 <span className="t-data muted">trade_fee_bps = {TRADE_FEE_BPS}</span>
               </div>
               <div className="fee-bar" aria-hidden>
@@ -179,6 +226,27 @@ export default function Landing() {
               </div>
               <dl className="kv">
                 {FEE_SPLIT.map((f) => (
+                  <div key={f.key}>
+                    <dt className="t-body">
+                      <span className={`key-swatch fee-key__${f.key}`} aria-hidden />
+                      <WithTickers>{f.label}</WithTickers>
+                      <span className="t-data muted fees__source">{f.source}</span>
+                    </dt>
+                    <dd className="t-data-lg">{f.share}%</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="tile__head">
+                <span className="t-label">Each arbitrage profit</span>
+                <span className="t-data muted">2–4 hops · must end with more</span>
+              </div>
+              <div className="fee-bar" aria-hidden>
+                {ARB_SPLIT.map((f) => (
+                  <i key={f.key} className={`fee-bar__${f.key}`} style={{ flexGrow: f.share }} />
+                ))}
+              </div>
+              <dl className="kv">
+                {ARB_SPLIT.map((f) => (
                   <div key={f.key}>
                     <dt className="t-body">
                       <span className={`key-swatch fee-key__${f.key}`} aria-hidden />
@@ -199,7 +267,7 @@ export default function Landing() {
               <h2 id="assets-title" className="t-heading-md">
                 Supported stocks
               </h2>
-              <p className="t-body-lg body">One sw token per stock, backed by every issuer&apos;s version in the vault.</p>
+              <p className="t-body-lg body">One sw token per stock, backed by every issuer&apos;s version in the vault&apos;s pools.</p>
             </div>
             <table className="table assets">
               <thead>
@@ -264,8 +332,8 @@ export default function Landing() {
               <figure className="tile partner-sample" aria-label="How Stockwoven appears in a partner app">
                 <figcaption className="t-label muted">Example: an investment screen in your app</figcaption>
                 <div className="partner-sample__row">
-                  <TickerChip ticker="INTC" />
-                  <span className="t-data">1,450.55 swINTC</span>
+                  <TickerChip ticker="SPCX" />
+                  <span className="t-data">1,450.55 swSPCX</span>
                 </div>
                 <p className="t-body body">Tickers keep the sw prefix and the monospaced face. Your colors on the chip.</p>
                 <div className="partner-sample__badge">
@@ -308,7 +376,7 @@ export default function Landing() {
                 Try the vault on devnet
               </h2>
               <p className="t-body-lg hero__lead">
-                Connect a Solana wallet, get test tokens from the faucet, then deposit, convert and redeem. Nothing uses real
+                Connect a Solana wallet, get test tokens from the faucet, then deposit, swap and redeem. Nothing uses real
                 funds.
               </p>
               <div className="hero__actions">

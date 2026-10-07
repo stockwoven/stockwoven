@@ -1,17 +1,28 @@
 # Redeem.
 
-Burn swINTC and take your share of both tokens. The vault never pauses redemptions.
+Burn swSPCX and take your slice of every token the vault holds, or receive it all as USDC. The vault never pauses redemptions.
 
 ## How a redemption works
 
-Always open. You take your share of both tokens straight from the Meteora pool.
+For `s` shares burned, the vault:
 
-Each share removes its pro-rata slice of the vault's position liquidity. cp-amm pays both tokens directly to the holder, rounding down against the redeemer.
+- removes `s / supply` of its liquidity from every pool, rounded down, and cp-amm pays out both of each pool's tokens;
+- pays `s / supply` of every idle reserve's balance, rounded down.
+
+You receive all of it in kind, in one transaction: SPCXx, SPCX, SPCXon, USDC and SOL, in whatever proportions the vault holds at that moment. Rounding goes against the redeemer, so a redemption never takes value from the holders who stay.
+
+Redeeming a very small amount can round one token down to zero. If that makes cp-amm reject the withdrawal, the transaction fails and you keep your swSPCX.
+
+## Receive USDC
+
+If you'd rather get one token back, the app can redeem in kind and swap everything you receive to USDC in the same transaction. The swaps go through the vault's pools and market pools.
+
+It costs the pool fee on every swap (0.30% in the vault's pools) and their price impact. There is no vault fee. The app shows the USDC you'll receive before you sign, and the transaction fails if any swap fills worse than its limit.
 
 ## Slippage limit
 
-The app accepts up to 0.5% less of each token than the quote. If the pool moves further, the transaction fails and nothing is burned.
+The app accepts a little less of each token than the quote. If the pools move further before the transaction lands, it fails and nothing is burned.
 
 ## Redemptions are never paused
 
-The vault's pause only stops deposits. Issuer powers are a separate risk: see [Risks & protections](/docs/risks).
+The vault's pause only stops deposits. Issuer powers are a separate risk: an issuer that freezes its own token can block that token's transfer, and with it the redemption. See [Risks & protections](/docs/risks).

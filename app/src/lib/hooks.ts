@@ -15,20 +15,21 @@ import {
   VersionedTransaction,
 } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PoolState, SHARE_DECIMALS, VAULT, ata, fetchPool } from "./stockwoven";
-import { USDC_ROUTE } from "./usdcRoute";
+import { ASSETS, SHARE_DECIMALS, SOL, VAULT, VaultState, assetAccount, ata, fetchVaultState } from "./stockwoven";
 
 export type VaultData = {
-  pool: PoolState;
-  shareSupply: bigint;
-  /** Raw token balances; `lamports` is the wallet's SOL in raw units, `sol` the same in SOL. */
-  user?: { a: bigint; b: bigint; shares: bigint; usdc: bigint; sol: number; lamports: bigint };
+  state: VaultState;
+  /**
+   * Raw wallet balances per vault asset. For SOL it is what the wallet can put in: its SOL plus
+   * any wSOL it already holds. `lamports` is the native SOL alone.
+   */
+  user?: { balances: bigint[]; shares: bigint; lamports: bigint; wsol: bigint; exists: boolean[] };
 };
 
 const tokenAmount = (data?: Buffer | Uint8Array | null) =>
   data && data.length >= 72 ? Buffer.from(data).readBigUInt64LE(64) : 0n;
 
-/** Pool reserves, share supply and the connected wallet's balances, refreshed every 10 s. */
+/** The vault's pools, reserves and supply, and the connected wallet's balances, refreshed every 10 s. */
 export function useVaultData() {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
@@ -37,31 +38,20 @@ export function useVaultData() {
 
   const refresh = useCallback(async () => {
     try {
-      const [pool, supply] = await Promise.all([
-        fetchPool(connection),
-        connection.getTokenSupply(VAULT.shareMint),
-      ]);
+      const state = await fetchVaultState(connection);
       let user: VaultData["user"];
       if (publicKey) {
         const [accounts, lamports] = await Promise.all([
-          connection.getMultipleAccountsInfo([
-            ata(publicKey, VAULT.mintA),
-            ata(publicKey, VAULT.mintB),
-            ata(publicKey, VAULT.shareMint),
-            ...(USDC_ROUTE ? [ata(publicKey, USDC_ROUTE.usdc)] : []),
-          ]),
+          connection.getMultipleAccountsInfo([...ASSETS.map((_, k) => assetAccount(publicKey, k)), ata(publicKey, VAULT.shareMint)]),
           connection.getBalance(publicKey),
         ]);
-        user = {
-          a: tokenAmount(accounts[0]?.data),
-          b: tokenAmount(accounts[1]?.data),
-          shares: tokenAmount(accounts[2]?.data),
-          usdc: tokenAmount(accounts[3]?.data),
-          sol: lamports / 1e9,
-          lamports: BigInt(lamports),
-        };
+        const balances = ASSETS.map((_, k) => tokenAmount(accounts[k]?.data));
+        const wsol = SOL >= 0 ? balances[SOL] : 0n;
+        if (SOL >= 0) balances[SOL] = wsol + BigInt(lamports);
+        const exists = accounts.map((a) => !!a);
+        user = { balances, shares: tokenAmount(accounts[ASSETS.length]?.data), lamports: BigInt(lamports), wsol, exists };
       }
-      setData({ pool, shareSupply: BigInt(supply.value.amount), user });
+      setData({ state, user });
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -85,9 +75,10 @@ export function explainError(e: unknown) {
   if (/reject|denied|declined/i.test(message)) return "You declined the request in your wallet. Nothing was sent.";
   if (/insufficient (funds|lamports)|0x1\b/i.test(message)) return "Not enough devnet SOL or tokens to pay for this. Get test tokens, then try again.";
   if (/blockhash|expired|block height exceeded/i.test(message)) return "The transaction expired before it confirmed. Try again.";
-  if (/DepositsPaused|Deposits are paused|0x1771\b|"Custom":6001\b/i.test(message)) return "Deposits are paused by the vault. Redemptions stay open.";
+  // Program error codes: DepositsPaused = 6002, SlippageExceeded = 6022 (programs/stockwoven/src/error.rs).
+  if (/DepositsPaused|Deposits are paused|0x1772\b|"Custom":6002\b/i.test(message)) return "Deposits are paused by the vault. Redemptions stay open.";
   if (/InstructionFallbackNotFound|0x65\b|"Custom":101\b/.test(message)) return "The devnet vault program does not support this yet. It needs the latest program upgrade.";
-  if (/slippage|0x177a\b|"Custom":6010\b/i.test(message)) return "The pool moved past your slippage limit. Refresh the quote and try again.";
+  if (/slippage|0x1786\b|"Custom":6022\b/i.test(message)) return "The pools moved past your slippage limit. Refresh the quote and try again.";
   return message;
 }
 
@@ -105,7 +96,7 @@ export function useSend(onDone: () => void) {
       if (!publicKey) return;
       try {
         setStatus({ kind: "pending", text: `Approve the ${label.toLowerCase()} in your wallet.` });
-        const instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }), ...ixs];
+        const instructions = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ...ixs];
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
         let tx: Transaction | VersionedTransaction;
         if (lookupTable) {
@@ -141,12 +132,12 @@ export function useFaucet(onDone: () => void) {
 
   const drip = useCallback(async () => {
     if (!publicKey) return;
-    setStatus({ kind: "pending", text: "Sending 10 mINTCx, 10 mINTC, 100 test USDC and devnet SOL for fees." });
+    setStatus({ kind: "pending", text: "Sending 10 of each mock SpaceX token, 2,000 test USDC and devnet SOL for fees." });
     try {
       const res = await fetch("/api/faucet", { method: "POST", body: JSON.stringify({ owner: publicKey.toBase58() }) });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
-        setStatus({ kind: "ok", text: "10 mINTCx, 10 mINTC and 100 test USDC are in your wallet.", signature: body.signature });
+        setStatus({ kind: "ok", text: "10 SPCXx, 10 SPCX, 10 SPCXon and 2,000 test USDC are in your wallet.", signature: body.signature });
         onDone();
       } else if (res.status === 429) {
         setStatus({ kind: "err", text: "The faucet sends once a minute per wallet. Try again in a minute." });
@@ -161,7 +152,7 @@ export function useFaucet(onDone: () => void) {
   return { drip, status };
 }
 
-export type ActivityKind = "Deposit" | "Redeem" | "Convert" | "Test tokens" | "Other";
+export type ActivityKind = "Deposit" | "Redeem" | "Swap" | "Test tokens" | "Other";
 
 export type Activity = {
   signature: string;
@@ -173,11 +164,11 @@ export type Activity = {
   details: "ok" | "loading" | "unavailable";
 };
 
+const SHARE_SYMBOL = `sw${VAULT.stock}`;
+/** Token balances the activity list follows. SOL is read from the wallet's lamports instead of wSOL. */
 const SYMBOLS: [PublicKey, string][] = [
-  [VAULT.shareMint, "swINTC"],
-  [VAULT.mintA, "mINTCx"],
-  [VAULT.mintB, "mINTC"],
-  ...(USDC_ROUTE ? [[USDC_ROUTE.usdc, "USDC"] as [PublicKey, string]] : []),
+  [VAULT.shareMint, SHARE_SYMBOL],
+  ...ASSETS.filter((a) => a.kind !== "sol").map((a): [PublicKey, string] => [a.mint, a.symbol]),
 ];
 
 function delta(tx: ParsedTransactionWithMeta, owner: string, mint: PublicKey) {
@@ -197,16 +188,17 @@ function solDelta(tx: ParsedTransactionWithMeta, owner: string) {
 }
 
 function classify(changes: Map<string, number>, logs: string[]): ActivityKind {
-  const [shares, a, b] = [changes.get("swINTC") ?? 0, changes.get("mINTCx") ?? 0, changes.get("mINTC") ?? 0];
+  const shares = changes.get(SHARE_SYMBOL) ?? 0;
   if (shares > 0) return "Deposit";
   if (shares < 0) return "Redeem";
-  if ((a < 0 && b > 0) || (a > 0 && b < 0)) return "Convert";
-  if (a > 0 && b > 0) return "Test tokens";
+  const tokens = [...changes].filter(([symbol]) => symbol !== SHARE_SYMBOL && symbol !== "SOL").map(([, amount]) => amount);
+  if (tokens.some((x) => x < 0) && tokens.some((x) => x > 0)) return "Swap";
+  if (tokens.length > 1 && tokens.every((x) => x > 0)) return "Test tokens";
   // No balance moved, e.g. a failed transaction: name it after the instruction it ran.
   const ran = (name: string) => logs.includes(`Program log: Instruction: ${name}`);
-  if (ran("Deposit") || ran("DepositSingle")) return "Deposit";
+  if (ran("Deposit")) return "Deposit";
   if (ran("Redeem")) return "Redeem";
-  if (ran("Swap")) return "Convert";
+  if (ran("Swap")) return "Swap";
   return "Other";
 }
 
@@ -248,8 +240,8 @@ async function fetchParsed(connection: Connection, signature: string) {
 }
 
 /**
- * A wallet's latest vault activity. Every deposit, redeem, conversion and faucet drip touches the
- * wallet's mINTCx account, so its signatures are the history. `onRows` gets the rows as soon as
+ * A wallet's latest activity. The wallet signs or receives every deposit, redeem, swap and faucet
+ * drip, so its own signatures are the history. `onRows` gets the rows as soon as
  * the signatures arrive, then again as each transaction's details load; it stops once `stale()`.
  */
 export async function loadActivity(
@@ -260,7 +252,7 @@ export async function loadActivity(
   stale: () => boolean = () => false,
 ) {
   const owner = wallet.toBase58();
-  const signatures = await connection.getSignaturesForAddress(ata(wallet, VAULT.mintA), { limit }, "confirmed");
+  const signatures = await connection.getSignaturesForAddress(wallet, { limit }, "confirmed");
   const rows = signatures.map((s) => toActivity(s, owner, parsed.get(s.signature)));
   if (stale()) return;
   onRows([...rows]);

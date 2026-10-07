@@ -1,5 +1,5 @@
-//! Read-only views of cp-amm accounts. Offsets include the 8-byte discriminator
-//! (cp-amm 0.2.4 / 0.2.5 zero-copy layouts).
+//! Read-only views of cp-amm and token accounts. cp-amm offsets include the 8-byte
+//! discriminator (cp-amm 0.2.4 / 0.2.5 zero-copy layouts).
 
 use anchor_lang::prelude::*;
 
@@ -12,6 +12,12 @@ const POOL_LIQUIDITY: usize = 360;
 const POOL_TOKEN_A_AMOUNT: usize = 680;
 const POOL_TOKEN_B_AMOUNT: usize = 688;
 const POSITION_UNLOCKED_LIQUIDITY: usize = 152;
+
+/// SPL token account layout, shared by Token-2022 for the base fields.
+const TOKEN_ACCOUNT_LEN: usize = 165;
+const TOKEN_MINT: usize = 0;
+const TOKEN_OWNER: usize = 32;
+const TOKEN_AMOUNT: usize = 64;
 
 pub struct PoolReserves {
     pub liquidity: u128,
@@ -48,8 +54,31 @@ pub fn read_pool(pool: &AccountInfo) -> Result<PoolReserves> {
     })
 }
 
-/// The vault's liquidity. It never vests or locks its position, so all of it is unlocked.
+/// The vault's liquidity. It never vests or locks its positions, so all of it is unlocked.
 pub fn position_liquidity(position: &AccountInfo) -> Result<u128> {
     let data = checked_data(position, &POSITION_DISCRIMINATOR, POSITION_UNLOCKED_LIQUIDITY + 16)?;
     Ok(u128::from_le_bytes(read(&data, POSITION_UNLOCKED_LIQUIDITY)))
+}
+
+fn token_data<'a>(account: &'a AccountInfo) -> Result<std::cell::Ref<'a, &'a mut [u8]>> {
+    require!(
+        *account.owner == anchor_spl::token::ID || *account.owner == anchor_spl::token_2022::ID,
+        ErrorCode::InvalidTokenAccount
+    );
+    let data = account.try_borrow_data()?;
+    require!(data.len() >= TOKEN_ACCOUNT_LEN, ErrorCode::InvalidTokenAccount);
+    Ok(data)
+}
+
+pub fn token_amount(account: &AccountInfo) -> Result<u64> {
+    Ok(u64::from_le_bytes(read(&token_data(account)?, TOKEN_AMOUNT)))
+}
+
+/// Mint and owner of a token account.
+pub fn token_mint_and_owner(account: &AccountInfo) -> Result<(Pubkey, Pubkey)> {
+    let data = token_data(account)?;
+    Ok((
+        Pubkey::new_from_array(read(&data, TOKEN_MINT)),
+        Pubkey::new_from_array(read(&data, TOKEN_OWNER)),
+    ))
 }

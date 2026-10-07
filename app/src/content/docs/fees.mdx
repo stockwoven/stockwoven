@@ -1,21 +1,50 @@
 # Fees.
 
-Conversions between issuers pay fees, and DAMM v2's compounding mode puts most of each fee back into the pool.
+Traders pay a fee in every vault pool, the keeper moves liquidity to where fees are highest, and arbitrage between pools adds the rest. Every rate on this page is set on-chain.
 
-## Where each conversion fee goes
+## Where the yield comes from
 
-With `trade_fee_bps = 10` and `compounding_fee_bps = 8000`, a 0.10% conversion fee splits into:
+swSPCX holders earn from three sources. None is promised: each depends on trading volume and on how far prices drift apart across pools.
+
+### 1. Pool fees
+
+Every swap in one of the vault's four pools pays `trade_fee_bps = 30`, a 0.30% fee. The pools run in DAMM v2's compounding mode, so most of each fee is added back to the pool's reserves while the pool's liquidity stays the same. Each unit of the vault's liquidity is then backed by more tokens.
+
+The stock/USDC and stock/SOL pools see far more volume than the stock/stock pools, because that's where people buy and sell SpaceX. The stock/stock pools earn when someone converts one issuer's token into another's.
+
+### 2. Auto-balancing
+
+A keeper bot measures each pool's fee yield and moves the vault's liquidity toward the pools that earn the most. See [Rebalancing](/docs/how-the-vault-works#rebalancing).
+
+### 3. Arbitrage
+
+When the same SpaceX trades at different prices across pools, the keeper runs a swap cycle through the vault's pools and market pools that ends with more of the token it started from. See [Arbitrage](/docs/how-the-vault-works#arbitrage).
+
+## Where each pool fee goes
+
+With `trade_fee_bps = 30` and `compounding_fee_bps = 8000`, each 0.30% pool fee splits into:
 
 - 20% to Meteora (fixed by cp-amm),
-- 64% compounded for swINTC holders,
-- 16% to the Stockwoven treasury.
+- 64% compounded into the pool for swSPCX holders,
+- 16% to the Stockwoven treasury, collected by `harvest`.
 
-## Conversions
+## Where each arbitrage profit goes
 
-A direct swap on the Meteora DAMM v2 pool, the same route Jupiter would take. Most of the fee stays in the pool and raises the value of every swINTC. Compounding pools charge the fee in token B: on the output for mINTCx → mINTC, on the input for mINTC → mINTCx.
+With `arb_fee_bps = 2000`:
 
-The app's Convert tab uses a 1% slippage limit.
+- 80% stays in the vault's reserves for swSPCX holders,
+- 20% goes to the Stockwoven treasury, in the token the cycle started from.
+
+## Swaps
+
+The app's Swap tab trades between any of the tokens (SPCXx, SPCX, SPCXon, USDC and SOL) across the vault's pools and market pools. A swap through a vault pool is a direct swap on Meteora DAMM v2, the same route Jupiter would take: the vault program is not in the path, and most of the fee stays in the pool, raising the value of every swSPCX.
+
+Compounding pools charge the fee in token B: on the output when you swap A for B, on the input when you swap B for A. The app shows the route, the fee and a slippage limit before you sign.
 
 ## Harvest
 
-Anyone can sweep the non-compounding part of the fee to the treasury. The holders' share never leaves the pool. In compounding pools that fee is in token B only. It is the protocol's cut.
+Anyone can call `harvest` on a vault pool. It sweeps that pool's non-compounding part of the fee, the protocol's 16%, to the treasury. In compounding pools that fee is in token B only. The holders' 64% never leaves the pool.
+
+## Protocol revenue
+
+Stockwoven earns the 16% of every pool fee and 20% of every arbitrage profit. There is no deposit or redemption fee.

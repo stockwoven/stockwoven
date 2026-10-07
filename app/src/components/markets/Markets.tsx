@@ -100,7 +100,7 @@ export function Markets() {
   const [failed, setFailed] = useState(false);
   const [win, setWin] = useState<WindowKey>("30");
   const [ses, setSes] = useState<SessionKey>("all");
-  const [stockKey, setStockKey] = useState("INTC");
+  const [stockKey, setStockKey] = useState("SPCX");
   const [shown, setShown] = useState(PAGE);
 
   useEffect(() => {

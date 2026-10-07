@@ -9,6 +9,9 @@ edition = "2021"
 rust-version = "1.89.0"
 
 [profile.release]
+# Size over speed keeps the program close to its devnet allocation. opt-level "z" overflows the
+# stack when deserializing the Vault account.
+opt-level = "s"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1

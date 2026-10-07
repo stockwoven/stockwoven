@@ -1,23 +1,41 @@
 # Hold.
 
-Each swINTC is a pro-rata slice of the vault's liquidity in the pool. Its value is read from the pool account, not from an oracle.
+Each swSPCX is a pro-rata slice of everything the vault holds: its liquidity in four Meteora DAMM v2 pools and its idle reserves. Its value is read from the pool and reserve accounts, not from an oracle.
 
-## How swINTC is valued
+## How swSPCX is valued
 
-Value per swINTC = the vault's liquidity per swINTC × pool reserves ÷ pool liquidity.
-
-In full:
+What one swSPCX holds, token by token:
 
 ```
-(L_vault / supply) × (token_a_amount / 10^dec_a + token_b_amount / 10^dec_b) / pool.liquidity
+for each token k:
+  per_share[k] = ( Σ over vault pools p holding k:  L_vault[p] / L_pool[p] × pool_reserve[p][k]
+                   + idle_reserve[k] ) / supply
 ```
 
-One token of either issuer counts as one share of stock.
+`L_vault[p]` is the vault's position liquidity in pool `p`, `L_pool[p]` the pool's total liquidity, and `pool_reserve[p][k]` the pool's balance of token `k`. All of it is on-chain.
+
+To show one number, the app prices each token in USD from the pools and adds them up: **1 swSPCX = $X**. That USD value is what the app displays.
+
+## What swSPCX is exposed to
+
+swSPCX is mostly SpaceX, but not 100%. Two of the vault's pools pair a SpaceX token with USDC (SPCX / USDC) and with SOL (SPCXx / SOL), and the vault keeps small idle balances of every token. So swSPCX's value is a mix of SpaceX, USDC and SOL:
+
+- when SpaceX rises, swSPCX rises a little less than SpaceX, and when it falls, a little less too;
+- when SOL moves, the SOL part moves with it;
+- the mix shifts over time as traders trade against the pools and the keeper rebalances.
+
+The app shows the current mix and its USD value, so you always see what one swSPCX is made of.
 
 ## Where the growth comes from
 
-Every conversion through the Meteora pool leaves a fee in its reserves, so each swINTC is backed by a little more stock. Compounding fees grow the reserves while the pool's liquidity stays the same. Single-token deposits through the vault's pool add a smaller second source: their 0.05% vault fee stays in the position without minting swINTC for it. See [Fees](/docs/fees).
+Three sources, none of them an oracle:
+
+1. **Pool fees.** Every swap in a vault pool pays 0.30%, and most of it compounds into the pool's reserves, so each unit of the vault's liquidity is backed by more tokens.
+2. **Auto-balancing.** The keeper moves the vault's liquidity toward the pools whose fees earn the most.
+3. **Arbitrage.** The keeper's swap cycles only land when the vault ends with more of the token it started from. 80% of that profit stays in the vault.
+
+None of them is promised: they depend on trading volume and price gaps between pools. See [Fees](/docs/fees#where-the-yield-comes-from).
 
 ## Verify it on-chain
 
-Every figure in the app can be checked against the pool account and the swINTC mint on Solana Explorer. The addresses are listed under [Contracts](/docs/overview#contracts).
+Every figure in the app can be checked against the pool accounts, the vault's reserves and the swSPCX mint on Solana Explorer. The addresses are listed under [Contracts](/docs/overview#contracts).

@@ -1,113 +1,134 @@
 # Stockwoven vault program: design
 
-One stock, one token. The vault holds liquidity in a **Meteora DAMM v2** pool that pairs two
-issuers' tokens of the same stock (MVP: INTCx from xStocks and INTC from Backpack). Holders
-own **swINTC**, a pro-rata claim on that liquidity. Conversions between issuers pay fees,
-and DAMM v2's compounding mode puts most of each fee back into the pool, so every swINTC is
-backed by more stock over time.
-
-## How it fits together
+One stock, one token. The swSPCX vault takes every issuer's SpaceX token (SPCXx from xStocks,
+SPCX from Backpack, SPCXon from Ondo), plus USDC and SOL, and spreads them across several
+**Meteora DAMM v2** pools it owns. Holders own **swSPCX**, a pro-rata claim on everything the vault
+holds. A keeper moves the vault's liquidity towards the pools that earn the most and arbitrages
+price gaps between pools.
 
 ```
-traders / Jupiter ──swap──▶ DAMM v2 pool (INTCx ↔ INTC, collect_fee_mode = Compounding)
-                              │  fee split per swap:
-                              │   20%  Meteora protocol fee
-                              │   LP fee × compounding_fee_bps  → stays in reserves (holders' yield)
-                              │   LP fee × the rest             → claimable by positions, in token B
-                              ▼
-                    position NFT owned by the vault PDA
-                              │
-          deposit / redeem ───┤ shares ↔ fixed liquidity units
-                              ▼
-                     swINTC (SPL mint, authority = vault PDA)
+users ── USDC, SOL, SPCXx, SPCX, SPCXon ──▶ vault ──▶ SPCXx / SPCX     (stock–stock)
+                                              │    ├▶ SPCXon / SPCXx   (stock–stock)
+   ◀── swSPCX (pro-rata: positions + idle) ───┤    ├▶ SPCX / USDC      (stock–USDC)
+                                              │    └▶ SPCXx / SOL      (stock–SOL)
+                                              │
+                    keeper ── rebalance_remove / vault_swap / rebalance_add (towards target weights)
+                           └─ arbitrage: a cycle through vault and market pools that must end richer
 ```
 
-The vault program is not in the swap path. Swaps go straight to cp-amm, so any router can
-fill them.
+## Where the yield comes from
+
+1. **Pool fees.** Every vault pool is a full-range DAMM v2 pool in compounding mode. Per swap fee:
+   20% to Meteora, `compounding_fee_bps` (80%) of the rest stays in the pool's reserves, so the
+   vault's liquidity is backed by more tokens, and the remainder is claimable by the position
+   (`harvest` sends it to the treasury). With the devnet settings (0.30% fee, 8000 bps) that is
+   64% for holders, 16% for the protocol. Stock/USDC and stock/SOL pools see far more volume than
+   stock/stock pools.
+2. **Auto-balancing.** The keeper measures each pool's fee yield (growth of `sqrt(reserve_a ·
+   reserve_b) / liquidity`, which price moves leave unchanged on x·y = k) and sets target weights
+   with `set_pool_weights`. It then takes liquidity out of overweight pools, swaps the idle tokens
+   into the pair an underweight pool needs, and adds it there.
+3. **Arbitrage.** When the same SpaceX trades at different prices across pools, the keeper runs a
+   2–4 hop swap cycle through the vault's reserves. The program checks that the start reserve grew
+   by at least `min_profit` and that every other reserve ended where it started. The treasury takes
+   `arb_fee_bps` (20%) of the profit; the rest stays with holders. Arbitraging its own pools keeps
+   the value that would otherwise leak to outside arbitrageurs.
+
+**Exposure.** Because two pools pair SpaceX with USDC and SOL, swSPCX is mostly SpaceX but not
+entirely: its value is a mix of SpaceX, USDC and SOL, and the app shows it in USD.
 
 ## Share accounting
 
-A share is a pro-rata claim on the vault's position liquidity, `L_vault`:
+A share is a pro-rata claim on **every** position's liquidity and **every** reserve's idle balance.
+No oracle is involved on-chain:
 
-- deposit `s` shares → add `s × ceil(L_vault / supply)` liquidity
-- redeem `s` shares → remove `s × floor(L_vault / supply)` liquidity
-- single-token deposit adding `ΔL` → mint `ΔL × (1 − zap fee) / ceil(L_vault / supply)` shares
+- deposit `s` shares → add `s × ceil(L_i / supply)` liquidity to each pool `i`, and pay
+  `ceil(s × idle_k / supply)` of each reserve `k`;
+- redeem `s` shares → remove `s × floor(L_i / supply)` from each pool, and receive
+  `floor(s × idle_k / supply)` of each reserve.
 
-`liquidity_per_share` is only the launch ratio. It applies when the supply is zero.
+The first pool's `add_pool` mints the seed shares to the admin; later pools may not mint shares, so
+liquidity seeded into them belongs to the existing holders. On devnet the seed is sized so that
+one swSPCX was worth about one SpaceX share at launch.
 
-Two things make a share worth more stock over time:
+Consequences:
 
-1. **Pool fees.** Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the
-   same, so every unit of liquidity is backed by more tokens.
-2. **Vault fees.** The single-token deposit keeps `ZAP_FEE_BPS` (0.05%) of the liquidity it adds
-   in the position without minting shares for it, so `L_vault / supply` rises for existing
-   holders.
-
-This design has three consequences:
-
-- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices deposits
-  and withdrawals. Every rounding favours the vault.
-- **No donation or inflation attack.** Only the vault can add liquidity to its position. Tokens
-  sent to the vault do not change what a share is worth.
-- **Dust.** Redeeming a few raw share units can pay out zero of a token. cp-amm rejects that
-  (`AmountIsZero`), so the transaction fails and the holder keeps the shares.
-
-The value of one share, which the app shows, is:
-`(L_vault / supply) × (token_a_amount / 10^dec_a + token_b_amount / 10^dec_b) / pool.liquidity`,
-counting one token of either issuer as one share of stock.
+- **Rebalancing and arbitrage never change the share count.** They only move value between
+  positions and reserves, both of which shares claim, so holders can deposit or redeem between any
+  two keeper steps.
+- **Deposits are bounded by their limits.** The user sends up to `max_amounts[k]` of each asset to
+  the reserves, cp-amm pulls what the liquidity needs, and the program checks that every reserve
+  still holds its old balance plus the user's idle slice before refunding the rest. If a pool took
+  more than the user sent, the shortfall would have come out of holders' idle tokens, and this
+  check rejects it.
+- **Rounding favours the vault** everywhere. Redeeming a few raw share units can pay out zero of a
+  pool's token; cp-amm rejects that (`AmountIsZero`) and the holder keeps the shares.
 
 ## Instructions
 
 | Instruction | Who | What |
 |---|---|---|
-| `initialize_vault` | admin | Creates the pool via `initialize_customizable_pool` (compounding, full range, flat fee). The vault PDA is the pool creator, so it owns the first position NFT. The admin supplies the seed tokens and receives `(L − dead) / liquidity_per_share` shares. Also creates the share mint, two reserve token accounts, and the admin's share ATA. |
-| `deposit(shares, max_a, max_b)` | anyone | Pulls up to `max_a`/`max_b` into vault-owned reserves, CPIs `add_liquidity` signed by the vault, refunds what cp-amm did not take, and mints `shares`. |
-| `deposit_single(input_is_a, amount_in, min_shares)` | anyone | Takes one issuer's token, swaps `sqrt(r × (r + a)) − r` of it on the pool (at the pool's price, never an assumed 1:1), adds both as liquidity, refunds the dust, and mints shares net of the 0.05% vault fee. `min_shares` bounds slippage. |
-| `redeem(shares, min_a, min_b)` | holder | Burns shares, then CPIs `remove_liquidity` straight to the holder in both tokens. Never paused by the vault. |
-| `harvest` | anyone | CPIs `claim_position_fee` to the treasury. In compounding pools that fee is in token B only. It is the protocol's cut. |
-| `set_deposits_paused` | admin | Circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open. |
+| `initialize_vault(stock, keeper, treasury, arb_fee_bps)` | admin | The vault PDA `["vault", stock]` and the share mint. |
+| `add_asset` | admin | Registers a mint and creates its reserve `["reserve", vault, mint]`. Up to 6 assets. |
+| `add_pool(args)` | admin | Creates a customizable compounding DAMM v2 pool for two assets with the vault as creator, so the vault owns the first position. The admin pays the seed. Up to 6 pools. |
+| `deposit(shares, max_amounts)` | anyone | Pro-rata into every pool and reserve; remaining accounts per asset and per pool. |
+| `redeem(shares, min_amounts)` | holder | Pro-rata out of every pool and reserve, in kind. Never paused. |
+| `rebalance_remove(index, liquidity, min_a, min_b)` | keeper | Pool liquidity into the reserves. |
+| `rebalance_add(index, liquidity, max_a, max_b)` | keeper | Reserves into pool liquidity; `liquidity = 0` adds everything both sides cover. |
+| `vault_swap(a_to_b, amount_in, min_out)` | keeper | Swaps between two reserves on any cp-amm pool whose tokens are vault assets. |
+| `arbitrage(a_to_b[], amount_in, min_profit)` | keeper | A cycle of 2–4 swaps that must return more of the start token. |
+| `harvest(index)` | anyone | Claims a pool's non-compounding fee to the treasury's token account. |
+| `set_deposits_paused`, `set_keeper`, `set_arb_fee`, `set_pool_weights` | admin | Settings. Weights sum to at most 10000 bps; the rest is the idle buffer. |
 
-Reserve token accounts exist because cp-amm pulls liquidity from token accounts owned by the
-position's signer, which is the vault PDA.
+`deposit` and `redeem` touch about 45 accounts (10 fixed, 3 per asset, 5 per pool), so clients send
+them as v0 transactions with the vault's address lookup table.
 
-## Fee split with the deck's numbers
+## What the keeper can and cannot do
 
-With `trade_fee_bps = 10` and `compounding_fee_bps = 8000`, a 0.10% conversion fee splits into:
-
-- 20% to Meteora (fixed by cp-amm),
-- 64% compounded for swINTC holders,
-- 16% to the Stockwoven treasury.
+The keeper signs rebalances, vault swaps and arbitrage. It chooses sizes and price limits, so it is
+trusted not to sell the vault's tokens at bad prices through `vault_swap`; every arbitrage is
+checked on-chain. It cannot mint or burn shares, move tokens out of the vault's reserves except into
+cp-amm pools, or block redemptions. `scripts/keeper.ts` is the devnet keeper; it caps every swap at
+2% of the pool it trades in.
 
 ## Decisions and limits
 
-- **Single-token deposits pay the swap fee** on the swapped part, plus price impact and the vault fee. In tests, a deposit of 0.1% of the pool gets back 99.74% on an immediate redeem.
-- **One customizable pool per mint pair, ever** (cp-amm seeds `["cpool", max, min]`). On mainnet,
-  check that nobody created INTCx/INTC first, and choose token A/B on purpose: fees accrue in B.
-- **Token-2022 issuer tokens** need Meteora token badges, which INTCx and Backpack INTC already
-  have. They are passed as remaining accounts to `initialize_vault`.
-- **Issuer powers stay.** Pause, freeze and permanent delegate can still halt or drain the pool
-  vaults; the vault cannot prevent that. The scaled-UI multiplier (dividends, splits) shifts the
-  fair raw price, and arbitrage takes that value from LPs. That is why there is a pause and a
-  per-issuer watcher (the Tape).
-- **Full range (x·y = k).** Capital is used less efficiently than in a concentrated pool. The
-  production path is a DLMM position concentrated at the peg, with a keeper that compounds fees.
+- **One customizable pool per mint pair, ever** (cp-amm seeds `["cpool", max, min]`). Market pools
+  for arbitrage must use other pairs, or config-based pools.
+- **Token-2022 issuer tokens** need Meteora token badges, which SPCXx, Backpack SPCX and SPCXon have
+  on mainnet for the pairs that exist. They are passed as remaining accounts to `add_pool`.
+- **Issuer powers stay.** Pause, freeze and permanent delegate can halt or drain a pool or a reserve.
+  A frozen token blocks redemptions in kind until it is unfrozen, because every redemption pays out
+  every asset; deposits can be paused by the admin.
+- **Full range (x·y = k).** Volatile pairs (stock/USDC, stock/SOL) take divergence loss when prices
+  move; fees and arbitrage have to beat it. Concentrated DLMM positions are the next step.
+- **Arbitrage on mainnet** would also route through Jupiter; the program only knows cp-amm pools.
 
 ## Testing
 
 `programs/stockwoven/tests/test_vault.rs` runs in LiteSVM against the real cp-amm binary
-(`scripts/fetch-fixtures.sh` dumps it from mainnet). It covers:
-
-- pool creation, with plain SPL tokens and with Token-2022 issuer tokens (a permanent delegate, like xStocks and Backpack), with and without token badges,
-- deposit with refund, and single-token deposits from either issuer,
-- 40 direct swaps, harvest to the treasury, and redeeming more stock than was deposited,
-- rounding across several holders, dust redeems, slippage limits and pause behaviour.
-
-Unit tests cover the integer math in `src/math.rs`.
+(`scripts/fetch-fixtures.sh` dumps it from mainnet), with the five assets and four pools, using v0
+transactions and a lookup table like the app. It covers setup with plain SPL and Token-2022 issuer
+tokens, pro-rata deposit and redeem, deposit limits protecting idle reserves, fees compounding for
+holders and harvest, rebalancing between pools, profitable and rejected arbitrage (including an
+Ondo price gap), keeper and treasury checks, account-order checks, rounding, pause, admin settings
+and a compute-unit profile (deposit ≈ 264k CU, redeem ≈ 238k, 3-hop arbitrage ≈ 144k).
 
 ```
 scripts/fetch-fixtures.sh            # once
-anchor build --arch v0 && cargo test -- --nocapture
+cargo build-sbf --manifest-path programs/stockwoven/Cargo.toml --arch v0 && cargo test -p stockwoven
 ```
 
-Build with `--arch v0`. Anchor 1.2 defaults to SBPF v3, which LiteSVM's default feature set
-cannot load. cp-amm itself ships as v0.
+Build with `--arch v0`: Anchor 1.2 defaults to SBPF v3, which LiteSVM's default feature set cannot
+load. The release profile uses `opt-level = "s"` to keep the program near its devnet allocation.
+
+## Devnet
+
+```
+KEYPAIR=//wsl.localhost/Ubuntu/home/pedro/.config/solana/id.json \
+FAUCET_KEYPAIR=C:/Users/pedro/.stockwoven/faucet-keypair.json npm run devnet:setup
+KEYPAIR=… npm run keeper     # every minute: arbitrage, weights, rebalance, hourly harvest
+KEYPAIR=… npm run traffic    # random swaps, so pools earn fees and prices drift apart
+```
+
+The setup writes every address to `scripts/devnet.json` and `app/src/lib/devnet.json`.

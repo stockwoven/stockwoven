@@ -7,3 +7,4 @@ test-ledger
 .yarn
 .surfpool
 programs/stockwoven/tests/fixtures/*.so
+scripts/keeper-state.json

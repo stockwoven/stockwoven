@@ -1,59 +1,42 @@
-import { Todo } from "@/components/docs/Todo";
-
 # Deposit.
 
-Hand over the vault's current mix of mINTCx and mINTC. Receive swINTC.
+Hand over the vault's current mix, or pay with one token and let the app swap it into the mix. Receive swSPCX.
 
 ## How a deposit is priced
 
-Both issuers' tokens go in at the pool's current mix. No price oracle: everyone adds liquidity at the same ratio.
+One swSPCX is a pro-rata slice of everything the vault holds: its liquidity in each of its four Meteora DAMM v2 pools and the idle balance of each of its five reserves (SPCXx, SPCX, SPCXon, USDC and SOL). There is no price oracle. Everyone who deposits adds the same slice of the same mix.
 
-You choose how much swINTC to receive. Each share adds its pro-rata slice of the vault's position liquidity, and cp-amm takes the matching amount of each token, rounding up against the depositor.
+You choose how many swSPCX to receive. For `s` new shares, the vault:
 
-## Single-token deposits
+- adds `s / supply` of its liquidity to every pool, rounded up, and cp-amm takes the matching amount of each pool's two tokens;
+- keeps `s / supply` of every idle reserve's balance, rounded up;
+- refunds whatever you sent beyond that, in the same transaction.
 
-You can also deposit just one issuer's token. Part of it has to become the other issuer's token first, and there are two routes for that. The app quotes both and takes the one that mints more swINTC.
+Every rounding goes against the depositor, so a deposit never dilutes existing holders. The amounts the app asks for come from the pool and reserve accounts at the moment you sign.
 
-### Through USDC pools
+## Deposit with the mix
 
-Part of your token is sold for USDC in its stock/USDC pool, and the USDC buys the other issuer's token in that one's stock/USDC pool. Both then go into the vault at the pool's mix, as a normal deposit. The vault's pool grows in both tokens.
+If you hold every token in the vault's mix, you can deposit them directly. The app reads the current mix, shows how much of each token the deposit takes, and sends a little extra of each as a buffer. What the vault doesn't use comes back in the same transaction.
 
-It costs the two conversions' fees, with no vault fee. Each conversion must fill within 0.1% of its quote, or the whole transaction fails. Whatever the deposit does not take stays in your wallet, including a little USDC.
+## Deposit with one token
 
-On devnet the route uses a test USDC and two pools priced at 20 USDC per share.
+You can also pay with a single token: USDC, SOL, or any one issuer's SpaceX token (SPCXx, SPCX or SPCXon).
 
-### Through the vault's pool
+The app splits your token into the vault's mix by swapping parts of it through the vault's pools and market pools, then makes a normal deposit, all in one transaction. If any step fails, nothing happens.
 
-The vault swaps the right part of your token on its own Meteora pool, at the pool's price, adds both tokens as liquidity and refunds the dust in the same transaction. The token you bring is the only one the pool gains: the other one leaves in the swap and comes back in the deposit.
+It costs:
 
-This route costs:
+- the pool fee on every swapped part (0.30% in the vault's pools),
+- price impact on those swaps, which grows with the size of the deposit against the pools,
+- no vault fee.
 
-- the pool's conversion fee on the part that is swapped,
-- price impact from that swap,
-- a 0.05% vault fee, which stays in the position and raises the value of every existing swINTC.
+The swaps the app routes through the vault's own pools pay their fee to the vault, so part of what you pay goes to swSPCX holders, you included. Whatever the deposit doesn't take stays in your wallet.
 
-In tests, a single-token deposit of 0.1% of the pool gets back 99.74% on an immediate redeem. You set a minimum amount of swINTC to receive. If the pool moves past it, the transaction fails.
-
-When the vault's pool is short of the token you bring, it pays more for it, so this route can mint more swINTC. Such a deposit also pulls the pool back toward one-to-one.
-
-## Deposit with USDC or SOL
-
-You can start from USDC or SOL instead of a stock token.
-
-- **USDC** is split between the two stock/USDC pools, buying mINTCx and mINTC in the vault pool's mix. Both then go in as a normal deposit. Two conversion fees.
-- **SOL** is first wrapped and swapped for USDC in a SOL/USDC pool, then follows the USDC route. Three conversion fees. The temporary wrapped-SOL account is closed in the same transaction, so its rent comes back.
-
-Either way the vault's pool grows in both tokens, and there is no vault fee. Each conversion must fill within 0.1% of its quote, or the whole transaction fails. Whatever the deposit does not take stays in your wallet.
-
-The app keeps 0.01 SOL in your wallet for the network fee and the token accounts a first deposit opens.
-
-On devnet these routes use test pools with fixed starting prices: 20 USDC per share of stock and 150 USDC per SOL. The SOL/USDC pool is small (2 SOL), so a large SOL deposit pays a visible price impact.
+For SOL, the app wraps it first and closes the temporary wrapped-SOL account in the same transaction, so its rent comes back. It keeps a little SOL in your wallet for the network fee and the token accounts a first deposit opens.
 
 ## Slippage limit
 
-The app allows up to 0.5% more of each token than the quote. Whatever cp-amm does not take is refunded in the same transaction.
-
-For a single-token deposit through the vault's pool, the app asks for at least 99.5% of the quoted swINTC.
+Before you sign, the app shows a slippage limit. A deposit with the mix fails if it would take more of any token than you sent. A deposit with one token also fails if any swap fills worse than its limit. Either way, nothing moves and nothing is minted.
 
 ## When deposits are paused
 
@@ -61,6 +44,6 @@ The admin can pause deposits as a circuit breaker for issuer events (pause, free
 
 ## Test tokens
 
-On devnet, the faucet in the app's Devnet tab sends 10 mINTCx, 10 mINTC, 100 test USDC and a little devnet SOL for fees, once a minute per wallet. For deposits in SOL, get more devnet SOL from faucet.solana.com.
+On devnet, the faucet in the app's Devnet tab sends 10 mock SPCXx, 10 mock SPCX, 10 mock SPCXon, 2,000 test USDC and a little devnet SOL, once a minute per wallet. For larger deposits in SOL, get more devnet SOL from faucet.solana.com.
 
-<Todo>Mainnet deposit requirements (supported issuer tokens, minimums) are not decided yet.</Todo>
+Mainnet deposit requirements, such as supported issuer tokens and minimums, are not decided yet.

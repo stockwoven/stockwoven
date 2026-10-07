@@ -2,36 +2,52 @@
 
 ## sw token
 
-The vault's token for one stock: the stock ticker with the lowercase `sw` prefix, such as `swINTC`. A pro-rata claim on the vault's liquidity.
+The vault's token for one stock: the stock ticker with the lowercase `sw` prefix, such as `swSPCX`. A pro-rata claim on everything the vault holds: its liquidity in every pool and its idle reserves.
 
 ## Issuer
 
-A company that tokenizes a stock. Several issuers can tokenize the same stock; each version trades in its own pool.
+A company that tokenizes a stock. Several issuers can tokenize the same stock; each version trades in its own pools. SpaceX is tokenized as SPCXx by xStocks, SPCX by Backpack and SPCXon by Ondo.
 
-## mINTCx and mINTC
+## Mock SPCXx, SPCX and SPCXon
 
-Devnet test tokens that stand in for INTCx from xStocks and INTC from Backpack.
+Devnet test tokens with the same symbols and decimals as the three issuers' SpaceX tokens. They stand in for the real ones on devnet.
 
 ## DAMM v2
 
-Meteora's constant-product AMM (cp-amm). The vault's liquidity sits in one DAMM v2 pool per stock.
+Meteora's constant-product AMM (cp-amm). The swSPCX vault holds liquidity in four DAMM v2 pools.
 
 ## Compounding fee
 
-The part of each conversion fee that DAMM v2 adds back to the pool's reserves. It raises the value of every sw token.
+The part of each pool fee that DAMM v2 adds back to the pool's reserves. It raises the value of every sw token.
 
-## Liquidity per share
+## Idle reserve
 
-The fixed amount of pool liquidity behind one share, set when the vault is created.
+A vault-owned token account for one token, holding the balance that isn't in a pool. It stages deposits, redemptions and keeper trades, and funds arbitrage. Each share owns its pro-rata slice of it.
+
+## Keeper
+
+The bot that signs the vault's rebalances, reserve swaps and arbitrage cycles. It can't mint shares or move funds out of the vault.
+
+## Target weight
+
+The keeper's target share of the vault's value in one pool, stored on-chain as `target_weight_bps`.
+
+## Arbitrage cycle
+
+A chain of 2 to 4 swaps that starts and ends in the same token. The program only lets it land if the vault ends with more of that token.
+
+## Divergence loss
+
+What a full-range pool gives up against simply holding its two tokens when their relative price moves.
 
 ## Harvest
 
-Sweeping the non-compounding part of the fee to the treasury. Anyone can call it.
+Sweeping the non-compounding part of a pool's fee, the protocol's cut, to the treasury. Anyone can call it.
 
 ## Treasury
 
-The account that receives the protocol's cut of conversion fees.
+The account that receives the protocol's cut: 16% of pool fees and 20% of arbitrage profit.
 
 ## Slippage limit
 
-The most a quote may move before the transaction fails: 0.5% for deposits and redemptions, 1% for conversions in the app.
+The most a quote may move before the transaction fails. The app shows it before you sign.

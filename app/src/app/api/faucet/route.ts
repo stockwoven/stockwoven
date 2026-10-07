@@ -1,6 +1,6 @@
-// Devnet-only faucet: mints mock issuer tokens (the admin holds the mint authority) and tops up
-// a little SOL for fees. Reads the admin keypair from FAUCET_SECRET_KEY (JSON array) or
-// FAUCET_KEYPAIR_PATH.
+// Devnet-only faucet: mints the three mock SpaceX tokens and test USDC (the faucet key holds their
+// mint authority) and tops up a little SOL for fees. Reads the faucet keypair from
+// FAUCET_SECRET_KEY (JSON array) or FAUCET_KEYPAIR_PATH.
 
 import { readFileSync } from "node:fs";
 import { NextResponse } from "next/server";
@@ -21,10 +21,10 @@ import {
 import devnet from "@/lib/devnet.json";
 
 const RPC = process.env.RPC_URL ?? "https://api.devnet.solana.com";
-const TOKENS_PER_DRIP = 10n;
-/** Test USDC, for deposits that start from USDC (the admin also holds its mint authority). */
-const USDC_PER_DRIP = 100n;
-const SOL_TOP_UP = 0.02 * LAMPORTS_PER_SOL;
+const STOCK_PER_DRIP = 10n;
+/** Test USDC, for deposits and swaps that start from USDC. */
+const USDC_PER_DRIP = 2_000n;
+const SOL_TOP_UP = 0.05 * LAMPORTS_PER_SOL;
 const recent = new Map<string, number>();
 
 function adminKeypair(): Keypair {
@@ -50,11 +50,9 @@ export async function POST(req: Request) {
     const admin = adminKeypair();
     const conn = new Connection(RPC, "confirmed");
     const tx = new Transaction();
-    const drips: [string, number, bigint][] = [
-      [devnet.mintA, devnet.decimalsA, TOKENS_PER_DRIP],
-      [devnet.mintB, devnet.decimalsB, TOKENS_PER_DRIP],
-      ...(devnet.usdcMint ? [[devnet.usdcMint, devnet.usdcDecimals, USDC_PER_DRIP] as [string, number, bigint]] : []),
-    ];
+    const drips: [string, number, bigint][] = devnet.assets
+      .filter((a) => a.kind !== "sol")
+      .map((a) => [a.mint, a.decimals, a.kind === "usdc" ? USDC_PER_DRIP : STOCK_PER_DRIP]);
     for (const [mint, decimals, units] of drips) {
       const mintKey = new PublicKey(mint);
       const account = getAssociatedTokenAddressSync(mintKey, owner);

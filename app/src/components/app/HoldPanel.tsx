@@ -2,18 +2,22 @@
 
 import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { SHARE_DECIMALS, VAULT, ata, explorer, fromRaw, navPerShare } from "@/lib/stockwoven";
+import { ASSETS, SHARE_DECIMALS, VAULT, ata, explorer, fromRaw, prices, usd, vaultValue, whole } from "@/lib/stockwoven";
 import { Button, Ticker } from "../ds";
 import { LearnMore } from "../LearnMore";
 import { useWalletPicker } from "../WalletPicker";
 import { useVault } from "./VaultData";
+
+const TICKER = VAULT.stock;
 
 export function HoldPanel() {
   const { data } = useVault();
   const { publicKey } = useWallet();
   const picker = useWalletPicker();
   const user = data?.user;
-  const nav = data ? navPerShare(data.pool, data.shareSupply) : 0;
+  const state = data?.state;
+  const perShare = state ? vaultValue(state).perShare : 0;
+  const px = state ? prices(state) : null;
   const shares = user ? Number(user.shares) / 10 ** SHARE_DECIMALS : 0;
 
   return (
@@ -32,7 +36,7 @@ export function HoldPanel() {
       {!publicKey ? (
         <div className="empty">
           <p className="t-body body">
-            Connect a wallet to see your <Ticker ticker="INTC" />.
+            Connect a wallet to see your <Ticker ticker={TICKER} />.
           </p>
           <Button variant="secondary" onClick={picker.open}>
             Connect wallet
@@ -43,23 +47,26 @@ export function HoldPanel() {
           <div className="balance">
             <span className="t-eyebrow muted">Balance</span>
             <span className="t-data-lg">
-              {user ? fromRaw(user.shares, SHARE_DECIMALS, 6) : <span className="skeleton" style={{ width: "6ch" }} />}{" "}
-              <Ticker ticker="INTC" />
+              {user ? fromRaw(user.shares, SHARE_DECIMALS, 6) : <span className="skeleton" style={{ width: "6ch" }} />} <Ticker ticker={TICKER} />
             </span>
-            <span className="t-data muted">{user ? `Backed by ${(shares * nav).toFixed(6)} INTC` : " "}</span>
+            <span className="t-data muted">{user && state ? `Worth ${usd(shares * perShare)} at ${usd(perShare)} each` : " "}</span>
           </div>
           <dl className="kv">
-            {[
-              ["mINTCx", "xStocks, mock", user && `${fromRaw(user.a, VAULT.decimalsA)} mINTCx`],
-              ["mINTC", "Backpack, mock", user && `${fromRaw(user.b, VAULT.decimalsB)} mINTC`],
-              ["USDC", "test token", user && `${fromRaw(user.usdc, 6, 2)} USDC`],
-              ["SOL", "fees and deposits", user && `${user.sol.toFixed(3)} SOL`],
-            ].map(([name, note, value]) => (
-              <div key={name}>
+            {ASSETS.map((a, k) => (
+              <div key={a.symbol}>
                 <dt className="t-body">
-                  {name} <span className="muted">· {note}</span>
+                  {a.symbol} <span className="muted">· {a.issuer ? `${a.issuer}, mock` : a.kind === "sol" ? "fees and deposits" : "test token"}</span>
                 </dt>
-                <dd>{value ? <span className="t-data">{value}</span> : <span className="skeleton" style={{ width: "7ch" }} />}</dd>
+                <dd>
+                  {user ? (
+                    <span className="t-data">
+                      {fromRaw(user.balances[k], a.decimals, a.kind === "usdc" ? 2 : 4)} {a.symbol}
+                      {px && px[k] > 0 && <span className="muted"> · {usd(whole(user.balances[k], k) * px[k])}</span>}
+                    </span>
+                  ) : (
+                    <span className="skeleton" style={{ width: "7ch" }} />
+                  )}
+                </dd>
               </div>
             ))}
           </dl>
@@ -75,7 +82,8 @@ export function HoldPanel() {
             </div>
           ) : (
             <p className="microcopy">
-              <span className="t-body muted">Value read from the pool account.</span> <LearnMore href="/docs/hold#how-swintc-is-valued" />
+              <span className="t-body muted">Value read from the vault&apos;s pools and reserves.</span>{" "}
+              <LearnMore href="/docs/hold#how-swspcx-is-valued" />
             </p>
           )}
         </>

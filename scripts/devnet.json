@@ -1,39 +1,151 @@
 {
   "cluster": "devnet",
   "program": "H9ZJiWoKXGrje8Y3errCSh2uXUiNpf8mDmjJ7TapZm7b",
-  "mintA": "A4MreQpJnaqkuiKqyPM9C1znHY1h7anRbEjj9WhbDRjB",
-  "mintB": "DEN6wzRx9uYg6rhEABWPsBbmh2t8i6zzJrvS9KiCHrzW",
-  "decimalsA": 8,
-  "decimalsB": 6,
-  "pool": "8YWKborDT1HTv1RGQ6RnPypupDtkcfkUHhbpqDF4Zg3x",
-  "vault": "EAVx4zUPniYFzfq6wXomYqABWgAQ1fyfF9HcwcNg68ju",
-  "shareMint": "9crixeL4zhTGV5ggDVKuuWTiTSMJBTD1tyAJngi6a2xZ",
-  "position": "7wAtm3mk5jM6ZfPfKfLkGMnMJ4dboyxyzaJyARyHv4vK",
-  "positionNftAccount": "Aq6YyhNcnSihrsb7ATAgbywhddyLQ5RSRZ8d7oGSVmpZ",
-  "tokenAVault": "D4aivGddwMGNak6dCmA1C6ujK31sufd9bSGyhy7ktk4k",
-  "tokenBVault": "HqXQLg7YYK4GoiLHHEM69TeqzqFY3suNaqPVwpw6wzxB",
-  "reserveA": "6LMPkTum1qwWYtVHVz5GWT8JnUwYHGuQPgb7CL5M2NBG",
-  "reserveB": "FWVVbQBEC5ddf7yWoVe8YM97wfJj6T6pgVCtoDMRPRQj",
-  "treasury": "3Kbce1j9DpDzM4fGS3qSJZeqX8ixjUPXVxfcJpRSdJ4n",
-  "liquidityPerShare": "922337203685477580",
-  "usdcMint": "5xzRhDT2jdyJ1WbwnyBdj8Gjb5JbNrD3G3w89b7Qeahz",
-  "usdcDecimals": 6,
-  "usdcRoutes": {
-    "a": {
-      "pool": "8Hv5gKY1AtLGJjcQL4YGECoSJdmaiuhB4wd6VdkKVncz",
-      "stockVault": "3z2wvoSntVveNkmjdT127SxKYdwhJXFHMF2uAP7Gg1EA",
-      "usdcVault": "8WAfxU9SsSS3qqLSqxquTagbDLiiKyUnLM5ggd47Wt2v"
+  "stock": "SPCX",
+  "vault": "GmqYTH8YLXRMBhxd4CYutRJbw1N9UUbxvFTDohbw365p",
+  "shareMint": "C7jWrmv58WRpohBrgcUmTpUicq5TqA8jDYV4YVx99HH2",
+  "admin": "Dwrba3bghFaRnE6RqGmRHLRKd4QqUr9Bz38Dt8KxQD1D",
+  "keeper": "Dwrba3bghFaRnE6RqGmRHLRKd4QqUr9Bz38Dt8KxQD1D",
+  "treasury": "Dwrba3bghFaRnE6RqGmRHLRKd4QqUr9Bz38Dt8KxQD1D",
+  "arbFeeBps": 2000,
+  "assets": [
+    {
+      "symbol": "SPCXx",
+      "name": "SpaceX xStock (mock)",
+      "issuer": "xStocks",
+      "kind": "stock",
+      "mint": "72KEUW3UYXDDfwkorkTrz2cjFB6JNPEMQxvvWp48kcWD",
+      "decimals": 8,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "reserve": "NiKGeQ4Ndzf3U5tgMksAA6v1sKCXZ58sUEzcJgeaiWb"
     },
-    "b": {
-      "pool": "Fumx8o5o411ikPBjBwLwqduY3mi9qzZ5YJw5TSgLje9q",
-      "stockVault": "FkZwo4e5UgU5ZmAZvCuTCVGKVpMfCm2fA4RsfeU6gtoN",
-      "usdcVault": "84bcHohhWNcGxCgJ3jtAc1734ZBAZbBvTuKgXmGefiZU"
+    {
+      "symbol": "SPCX",
+      "name": "SpaceX (Backpack) (mock)",
+      "issuer": "Backpack",
+      "kind": "stock",
+      "mint": "9r6tVtSuSEqXizpPsqkZXSVT99Mns156boaGMyjwoDjD",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "reserve": "HtMr3xSyxKTAvRq7XTd4CbcpdkHEV1cYSeAsU3ov3FvS"
+    },
+    {
+      "symbol": "SPCXon",
+      "name": "SpaceX (Ondo Tokenized) (mock)",
+      "issuer": "Ondo",
+      "kind": "stock",
+      "mint": "F9dxeL9egjMutFFtdscFrHcvF8D6CAxam2ddMWqQJvzZ",
+      "decimals": 9,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "reserve": "Fa1DPG1QdWs62W62ZyayGk6rTXms4jNPKm6uDZYJLk7L"
+    },
+    {
+      "symbol": "USDC",
+      "name": "USD Coin (mock)",
+      "issuer": null,
+      "kind": "usdc",
+      "mint": "5xzRhDT2jdyJ1WbwnyBdj8Gjb5JbNrD3G3w89b7Qeahz",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "reserve": "f7qSikvYXTPdXYzjWefZLvb2TcaRHXqNoMHwncKy8E5"
+    },
+    {
+      "symbol": "SOL",
+      "name": "Solana",
+      "issuer": null,
+      "kind": "sol",
+      "mint": "So11111111111111111111111111111111111111112",
+      "decimals": 9,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "reserve": "AoK5pkDzJbQJjZgArRWFrYfiafQtWgq6o6wzQ16rEhM1"
     }
+  ],
+  "pools": [
+    {
+      "label": "SPCXx / SPCX",
+      "kind": "stock-stock",
+      "pool": "CK1hZi9o3sRDR64aWzRfRiKqC9ibLab1mjCrnH6XKhUA",
+      "tokenAVault": "A2BL3kvEi8pjcXovFyes6BxFxaaY7QYFUs24KhqfgeoV",
+      "tokenBVault": "4dDc6ZETwuKy13dbe8PLshgz2Ctbyx2YasCrfPrZRkLG",
+      "a": 0,
+      "b": 1,
+      "feeBps": 30,
+      "position": "2BfjwUYhrUd4uTCqfeCr9TdDfk7ZafmgQL3WjXMzsN5K",
+      "positionNftAccount": "56VJ9iMSzSE8S9d7Hwg8LQgpgRVyzqpZ4XAmZR13bXes"
+    },
+    {
+      "label": "SPCXon / SPCXx",
+      "kind": "stock-stock",
+      "pool": "3M4j7WhWTiRXCcMSkWaTc2fJuWBUU71cX4aNbaqZCriM",
+      "tokenAVault": "FSTV2njMoBHjqQWzw8ZmhVZ2SwFZf118wF3LQeHQ36wh",
+      "tokenBVault": "4UQuoE6Rd4mTMABScHagJMrn6q8tNXjPq5FdZZ5P5SpN",
+      "a": 2,
+      "b": 0,
+      "feeBps": 30,
+      "position": "AToVmiHu2APa3uFkxfPuTTF3Du1B1ZTsFCSP2zXF735Z",
+      "positionNftAccount": "DFUb67ZG7ozG62rB2pysmkTKCXFgLpbfNgNYfvmbzUzm"
+    },
+    {
+      "label": "SPCX / USDC",
+      "kind": "stock-usdc",
+      "pool": "GC1E83NTdmGQDYtDHNbokgoomtC6bL8SwGqfBmAWwGky",
+      "tokenAVault": "2EfDvpVmL5csiVJGhoaEPPqEtktppV4k9pzTQ6H1QbFU",
+      "tokenBVault": "8TUKVZdcpAxCF92iACLc7LFpc9FcdhFWiz5ExoPowahP",
+      "a": 1,
+      "b": 3,
+      "feeBps": 30,
+      "position": "DPRBoVLswrDMzoBPprWHWsVEqNuY13MNq22GfYZhe1X4",
+      "positionNftAccount": "Ex8Q5GJJDy6JNhDQVBeDhAMCRckXH1MCDdPrav7SbJQW"
+    },
+    {
+      "label": "SPCXx / SOL",
+      "kind": "stock-sol",
+      "pool": "3hDKpudujQDsnTvk8hobcJc1HVYXsMMcLCMH9oeGU7fA",
+      "tokenAVault": "79aRM6LoRRh52GyWuuSr5wn8ZGQrpJuppAweLJSN4w9j",
+      "tokenBVault": "5pTbEPvYe5FDW27KyUMwFUAWEX75RKrijZYkm5fXsvM5",
+      "a": 0,
+      "b": 4,
+      "feeBps": 30,
+      "position": "246vrViEppQuA5voc1zZXaR66x37BUMVWgZ2qj4ZfJUh",
+      "positionNftAccount": "HV4RGLPBQ4bXQEZfrbuEi53WJYXbVTLow3voL3yn2ZDw"
+    }
+  ],
+  "marketPools": [
+    {
+      "label": "SPCXx / USDC (market)",
+      "kind": "market",
+      "pool": "JFrYsFN2v9bs777G5XFhLByjFYvHJKGH7XSNQFCMNn3",
+      "tokenAVault": "3eUeDHZMs9muEaUD5d1BQQZEWrrwWSJNeqC2G93YeBK5",
+      "tokenBVault": "BZWeepbywd35hpbMXPLtp31XNq3sikeVQa8nXQCjakp1",
+      "a": 0,
+      "b": 3,
+      "feeBps": 30
+    },
+    {
+      "label": "SPCXon / USDC (market)",
+      "kind": "market",
+      "pool": "AUoC4y39VeaksN4sKZS5du3ckD6HQv1qYLHXtQw8EeKu",
+      "tokenAVault": "FFXPRe7yWHBSxJSPhCR5KC1uz1QU1gmXASfTTaB2MxzS",
+      "tokenBVault": "BJji5AuUr3Xo2uaEq2y3xe3gqgFs4ukRUUQgcMsTSV9V",
+      "a": 2,
+      "b": 3,
+      "feeBps": 30
+    },
+    {
+      "label": "SOL / USDC (market)",
+      "kind": "market",
+      "pool": "3n6nM4mN722rB8oa5RH2c3y75eaGemhveBBK1xu45qYL",
+      "tokenAVault": "Bn83pTazSyX3agoq2Qidb3nBnGPC9LBwW4sT6aAPNKDr",
+      "tokenBVault": "FkVY8M4BCmGX2huiYqd31QGeQwJWcg7gAALhwhXWBVY7",
+      "feeBps": 10,
+      "a": 4,
+      "b": 3
+    }
+  ],
+  "launch": {
+    "stockUsd": 168,
+    "solUsd": 149.999999925,
+    "seedShares": "40089285714"
   },
-  "lookupTable": "5wvk9BrKeYEV13ExtaLM24Nbacvm67TW3jL1Kp9QBarf",
-  "solRoute": {
-    "pool": "3n6nM4mN722rB8oa5RH2c3y75eaGemhveBBK1xu45qYL",
-    "solVault": "Bn83pTazSyX3agoq2Qidb3nBnGPC9LBwW4sT6aAPNKDr",
-    "usdcVault": "FkVY8M4BCmGX2huiYqd31QGeQwJWcg7gAALhwhXWBVY7"
-  }
+  "lookupTable": "F2cbk6mCXNPbjmTThuqrqPDDSVb7qLLBbraTeraUqsf2"
 }

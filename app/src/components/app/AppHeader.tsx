@@ -10,7 +10,7 @@ import { WalletButton } from "../WalletButton";
 export const TABS = [
   { href: "/app", label: "Vaults" },
   { href: "/app/portfolio", label: "Portfolio" },
-  { href: "/app/convert", label: "Convert" },
+  { href: "/app/convert", label: "Swap" },
   { href: "/app/markets", label: "Markets" },
   { href: "/app/devnet", label: "Devnet" },
 ];

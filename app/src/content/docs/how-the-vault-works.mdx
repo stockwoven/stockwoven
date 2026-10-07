@@ -1,55 +1,92 @@
 # How the vault works.
 
-One stock, one token. The vault holds liquidity in a **Meteora DAMM v2** pool that pairs two issuers' tokens of the same stock (MVP: INTCx from xStocks and INTC from Backpack). Holders own **swINTC**, a pro-rata claim on that liquidity. Conversions between issuers pay fees, and DAMM v2's compounding mode puts most of each fee back into the pool, so every swINTC is backed by more stock over time.
+One stock, one token. SpaceX is tokenized by three issuers: SPCXx by xStocks, SPCX by Backpack and SPCXon by Ondo. The vault holds liquidity in four **Meteora DAMM v2** pools it owns, plus idle reserves of each token, and issues **swSPCX**, a pro-rata claim on all of it. Traders pay fees in those pools, a keeper moves liquidity toward the pools that earn the most, and arbitrage between pools adds profit that only lands when the vault ends with more.
 
 ## How it fits together
 
 ```
-traders / Jupiter ──swap──▶ DAMM v2 pool (INTCx ↔ INTC, collect_fee_mode = Compounding)
+traders / Jupiter ──swap──▶ four DAMM v2 pools (collect_fee_mode = Compounding, 0.30% fee)
+                              1. SPCXx  / SPCX     stock–stock
+                              2. SPCXon / SPCXx    stock–stock
+                              3. SPCX   / USDC     stock–USDC
+                              4. SPCXx  / SOL      stock–SOL
                               │  fee split per swap:
                               │   20%  Meteora protocol fee
-                              │   LP fee × compounding_fee_bps  → stays in reserves (holders' yield)
-                              │   LP fee × the rest             → claimable by positions, in token B
+                              │   64%  stays in reserves (holders' yield)
+                              │   16%  claimable by the position → treasury (harvest)
                               ▼
-                    position NFT owned by the vault PDA
+                    one position NFT per pool, owned by the vault PDA
+                    + vault reserves: SPCXx · SPCX · SPCXon · USDC · SOL
                               │
-          deposit / redeem ───┤ shares ↔ pro-rata liquidity
+          deposit / redeem ───┤ shares ↔ pro-rata slice of every position and reserve
+          keeper ─────────────┤ rebalance_remove · vault_swap · rebalance_add · arbitrage
                               ▼
-                     swINTC (SPL mint, authority = vault PDA)
+                     swSPCX (SPL mint, authority = vault PDA)
 ```
 
-The vault program is not in the swap path. Swaps go straight to cp-amm, so any router can fill them.
+The vault program is not in the path of ordinary swaps. They go straight to cp-amm, so any router can fill them.
+
+## The four pools
+
+| Pool | Kind | What it earns from |
+|---|---|---|
+| SPCXx / SPCX | stock–stock | Conversions between xStocks' and Backpack's SpaceX |
+| SPCXon / SPCXx | stock–stock | Conversions between Ondo's and xStocks' SpaceX |
+| SPCX / USDC | stock–USDC | People buying and selling SpaceX for dollars |
+| SPCXx / SOL | stock–SOL | People buying and selling SpaceX for SOL |
+
+All four are full range (x·y = k) with a 0.30% fee in compounding mode. The vault is each pool's creator, so it owns the first position in each.
 
 ## Share accounting
 
-A share is a pro-rata claim on the vault's position liquidity, `L_vault`:
+A share is a pro-rata claim on everything the vault holds: its position liquidity `L[p]` in every pool `p` and the idle balance `R[k]` of every reserve `k`.
 
-- deposit `s` shares → add `s × ceil(L_vault / supply)` liquidity
-- redeem `s` shares → remove `s × floor(L_vault / supply)` liquidity
-- single-token deposit adding `ΔL` → mint `ΔL × (1 − zap fee) / ceil(L_vault / supply)` shares
+- deposit `s` shares → add `ceil(s × L[p] / supply)` liquidity to every pool and pay `ceil(s × R[k] / supply)` into every reserve
+- redeem `s` shares → remove `floor(s × L[p] / supply)` liquidity from every pool and receive `floor(s × R[k] / supply)` of every reserve
 
-`liquidity_per_share` is only the launch ratio. It applies when the supply is zero.
+This has four consequences:
 
-Two things make a share worth more stock over time:
+- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices the liquidity part, and the idle part is a plain fraction of a balance. Every rounding favours the vault.
+- **No donation or inflation attack on the liquidity.** Only the vault can add liquidity to its positions. A token sent to a reserve is split among all holders like any other idle balance.
+- **The keeper can't change the share count.** Rebalancing and arbitrage move value between positions and reserves inside the vault. Holders can deposit or redeem between any two keeper steps.
+- **Dust.** Redeeming a few raw share units can pay out zero of a token. If cp-amm rejects that, the transaction fails and the holder keeps the shares.
 
-1. **Pool fees.** Compounding fees grow `pool.token_b_amount` while `pool.liquidity` stays the same, so every unit of liquidity is backed by more tokens.
-2. **Vault fees.** The single-token deposit keeps 0.05% of the liquidity it adds in the position without minting shares for it, so `L_vault / supply` rises for existing holders.
+## Rebalancing
 
-This has three consequences:
+The keeper bot measures each pool's fee yield and sets a target share of the vault's value per pool, stored on-chain as `target_weight_bps`. It keeps a small idle buffer in the reserves, which also funds arbitrage. Then it moves liquidity toward the targets in three steps:
 
-- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices deposits and withdrawals. Every rounding favours the vault.
-- **No donation or inflation attack.** Only the vault can add liquidity to its position. Tokens sent to the vault do not change what a share is worth.
-- **Dust.** Redeeming a few raw share units can pay out zero of a token. cp-amm rejects that, so the transaction fails and the holder keeps the shares.
+1. `rebalance_remove` takes liquidity out of an overweight pool into the vault's reserves.
+2. `vault_swap` swaps between two reserves on a cp-amm pool, to get the pair an underweight pool needs. `min_out` bounds the price.
+3. `rebalance_add` adds that liquidity to the underweight pool from the reserves.
+
+Every step keeps the tokens inside the vault: from a position to a reserve, from one reserve to another, from a reserve to a position. The keeper signs with the vault's keeper key and is trusted to choose sizes and prices, but it can't mint shares or move funds out of the vault.
+
+## Arbitrage
+
+When the same SpaceX trades at different prices across pools, for example Ondo's token cheaper than xStocks' in a market pool outside the vault, the keeper runs `arbitrage`: a swap cycle of 2 to 4 hops through the vault's pools and market pools that starts and ends in the same reserve.
+
+- Each hop swaps exactly what the previous one returned.
+- The cycle must end in the token it started from, and every other reserve ends where it started.
+- The program only lets it land if the starting reserve grew by at least `min_profit`. Otherwise the whole transaction fails.
+
+Of the profit, 80% stays in the reserve for swSPCX holders and `arb_fee_bps = 2000` (20%) goes to the treasury. Arbitraging its own pools also keeps value that the vault's positions would otherwise leak to outside arbitrageurs.
 
 ## Instructions
 
 | Instruction | Who | What |
 |---|---|---|
-| `initialize_vault` | admin | Creates the pool via `initialize_customizable_pool` (compounding, full range, flat fee). The vault PDA is the pool creator, so it owns the first position NFT. |
-| `deposit(shares, max_a, max_b)` | anyone | Pulls up to `max_a`/`max_b` into vault-owned reserves, adds liquidity signed by the vault, refunds what cp-amm did not take, and mints `shares`. |
-| `deposit_single(input_is_a, amount_in, min_shares)` | anyone | Takes one issuer's token, swaps the right part of it on the pool at the pool's price, adds both as liquidity, refunds the dust, and mints shares net of the 0.05% vault fee. `min_shares` bounds slippage. |
-| `redeem(shares, min_a, min_b)` | holder | Burns shares, then removes liquidity straight to the holder in both tokens. Never paused by the vault. |
-| `harvest` | anyone | Claims the position fee to the treasury. In compounding pools that fee is in token B only. It is the protocol's cut. |
+| `initialize_vault` | admin | Creates the vault for one stock and its share mint. |
+| `add_asset` | admin | Registers a token the vault may hold (an issuer's SpaceX, USDC or wrapped SOL) and creates its reserve. |
+| `add_pool` | admin | Creates a full-range compounding DAMM v2 pool for two registered assets, with the vault as its creator. The admin seeds it. |
+| `deposit(shares, max_amounts)` | anyone | Pulls up to `max_amounts` of each token, adds the pro-rata liquidity to every pool, keeps the pro-rata idle slice, refunds the rest and mints `shares`. |
+| `redeem(shares, min_amounts)` | holder | Burns shares and pays the pro-rata slice of every pool and reserve, in kind. Never paused by the vault. |
+| `rebalance_remove` | keeper | Moves liquidity out of one vault pool into the reserves. |
+| `vault_swap` | keeper | Swaps between two reserves on any cp-amm pool whose tokens are vault assets. |
+| `rebalance_add` | keeper | Adds liquidity to one vault pool from the reserves. |
+| `arbitrage` | keeper | A 2–4 hop swap cycle that must end with more of the starting token. |
+| `harvest` | anyone | Sends a pool's claimable fee, the protocol's cut, to the treasury. In compounding pools that fee is in token B only. |
 | `set_deposits_paused` | admin | Circuit breaker for issuer events (pause, freeze, depeg). Redemptions stay open. |
+| `set_pool_weights` | admin | Sets the target share of the vault's value per pool. |
+| `set_keeper`, `set_arb_fee` | admin | Changes the keeper key, or the treasury's share of arbitrage profit (at most 50%). |
 
 Reserve token accounts exist because cp-amm pulls liquidity from token accounts owned by the position's signer, which is the vault PDA.

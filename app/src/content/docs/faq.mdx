@@ -1,25 +1,37 @@
-import { Todo } from "@/components/docs/Todo";
-
 # FAQ.
 
-## Where does swINTC's growth come from?
+## Where does swSPCX's growth come from?
 
-From conversions between issuers. Every conversion through the Meteora pool leaves a fee in its reserves, so each swINTC is backed by a little more stock. See [Fees](/docs/fees).
+From three sources: the 0.30% fee traders pay in the vault's four pools, the keeper moving liquidity toward the pools that earn the most, and arbitrage between pools that only lands when the vault ends with more. None is promised. See [Fees](/docs/fees#where-the-yield-comes-from).
+
+## Is swSPCX 100% SpaceX?
+
+Mostly, not entirely. The vault holds USDC and SOL inside its SPCX / USDC and SPCXx / SOL pools, so swSPCX's value is a mix of SpaceX, USDC and SOL. The app shows its USD value as 1 swSPCX = $X. See [Hold](/docs/hold#how-swspcx-is-valued).
 
 ## Is there a price oracle?
 
-No. cp-amm's own `L × reserve / L_total` rule prices deposits and withdrawals. See [How the vault works](/docs/how-the-vault-works#share-accounting).
+No. A share is a pro-rata slice of every position and every reserve, and cp-amm's own `L × reserve / L_total` rule prices the liquidity part. See [How the vault works](/docs/how-the-vault-works#share-accounting).
+
+## Can I deposit with just one token?
+
+Yes: USDC, SOL or any issuer's SpaceX token. The app swaps it into the vault's mix and deposits, in one transaction. See [Deposit](/docs/deposit#deposit-with-one-token).
+
+## Can I get USDC back?
+
+Yes. The app can redeem in kind and swap everything to USDC in the same transaction. See [Redeem](/docs/redeem#receive-usdc).
 
 ## Can redemptions be paused?
 
 No. The vault can pause deposits, never redemptions. Issuer powers are a separate risk: see [Risks & protections](/docs/risks).
 
-## Can I deposit only one issuer's token?
+## What can the keeper do?
 
-Yes. Part of it buys the other issuer's token, through USDC pools or the vault's own pool, and both go in. See [Deposit](/docs/deposit#single-token-deposits).
+Move liquidity between the vault's pools, swap between its reserves and run arbitrage cycles. It is trusted to choose sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage must leave the vault with more. See [How the vault works](/docs/how-the-vault-works#rebalancing).
+
+## How does Stockwoven make money?
+
+From 16% of every pool fee, collected by `harvest`, and 20% of every arbitrage profit. There is no deposit or redemption fee. See [Fees](/docs/fees#protocol-revenue).
 
 ## Is this on mainnet?
 
 No. Solana devnet only. Nothing here uses real funds.
-
-<Todo>More questions from partners.</Todo>

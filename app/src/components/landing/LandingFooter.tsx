@@ -36,7 +36,8 @@ export function LandingFooter() {
         <div className="footer__note">
           <Lockup color="ivory" />
           <p className="t-body body">
-            Built on Meteora DAMM v2 with compounding fees. Test tokens stand in for INTCx from xStocks and INTC from Backpack.
+            Built on Meteora DAMM v2 with compounding fees. Test tokens stand in for SpaceX from xStocks (SPCXx), Backpack
+            (SPCX) and Ondo (SPCXon), and for USDC.
           </p>
           <p className="t-body muted">Solana devnet only. Nothing here uses real funds.</p>
         </div>
