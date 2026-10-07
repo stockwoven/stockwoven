@@ -215,7 +215,7 @@ export function VaultPanel() {
 
         {oneToken ? (
           <AmountField
-            label={`${input!.symbol} to deposit`}
+            label={`${input!.issuer ? `${input!.issuer} ` : ""}${input!.symbol} to deposit`}
             value={amount}
             onChange={setAmount}
             suffix={input!.symbol}

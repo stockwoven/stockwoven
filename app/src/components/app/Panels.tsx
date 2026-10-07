@@ -105,7 +105,7 @@ export function SwapPanel() {
         <TokenPicker label="From" value={from} onChange={(k) => { setFrom(k); if (k === to) setTo(from); }} exclude={-1} />
         <TokenPicker label="To" value={to} onChange={setTo} exclude={from} />
         <AmountField
-          label={`${ASSETS[from].symbol} to swap`}
+          label={`${ASSETS[from].issuer ? `${ASSETS[from].issuer} ` : ""}${ASSETS[from].symbol} to swap`}
           value={amount}
           onChange={setAmount}
           suffix={ASSETS[from].symbol}
@@ -136,7 +136,7 @@ export function SwapPanel() {
         </ConnectOr>
         <p className="microcopy">
           <span className="t-body muted">
-            Direct swaps on Meteora pools, {ALL_POOLS.filter((p) => p.vault).length} of them the vault&apos;s own. Their fees are the vault&apos;s yield.
+            Swaps go straight to Meteora pools. Fees paid in the vault&apos;s {ALL_POOLS.filter((p) => p.vault).length} own pools are part of sw{VAULT.stock} holders&apos; yield.
           </span>{" "}
           <LearnMore href="/docs/fees#swaps" />
         </p>

@@ -22,6 +22,13 @@ import { useVault } from "./VaultData";
 
 const TICKER = VAULT.stock;
 
+/** What each kind of pool pairs, in words. */
+const KIND_LABEL: Record<string, string> = {
+  "stock-stock": "between issuers",
+  "stock-usdc": "SpaceX and USDC",
+  "stock-sol": "SpaceX and SOL",
+};
+
 function Figure({ label, value, unit, loading }: { label: React.ReactNode; value: React.ReactNode; unit?: React.ReactNode; loading: boolean }) {
   return (
     <div className="figure">
@@ -58,15 +65,15 @@ export function VaultStats() {
       </div>
 
       <dl className="figures">
-        <Figure label={<>1 <Ticker ticker={TICKER} /></>} value={value && usd(value.perShare)} loading={loading} />
-        <Figure label="Since launch" value={`${sinceLaunch >= 0 ? "+" : "−"}${Math.abs(sinceLaunch * 100).toFixed(2)}%`} loading={loading} />
+        <Figure label="Value per token" value={value && usd(value.perShare)} loading={loading} />
+        <Figure label="Since launch, in USD" value={`${sinceLaunch >= 0 ? "+" : "−"}${Math.abs(sinceLaunch * 100).toFixed(2)}%`} loading={loading} />
         <Figure label="Vault value" value={value && usd(value.total, 0)} loading={loading} />
         <Figure label="Supply" value={state && fromRaw(state.supply, SHARE_DECIMALS, 2)} unit={<Ticker ticker={TICKER} />} loading={loading} />
       </dl>
 
       <div className="split-bar" aria-hidden="true">
         {pools.map(({ p, v }, i) => (
-          <i key={p.label} className={i % 2 ? "key-swatch--b" : undefined} style={{ flex: v || 1 }} />
+          <i key={p.label} style={{ flex: v || 1, background: i % 2 ? "var(--text-subtle)" : "var(--text)" }} />
         ))}
         {idle > 0 && <i style={{ flex: idle, opacity: 0.35 }} />}
       </div>
@@ -75,7 +82,7 @@ export function VaultStats() {
           <div key={p.label}>
             <dt className="t-body">
               <span className={i % 2 ? "key-swatch key-swatch--b" : "key-swatch"} />
-              {p.label} <span className="muted">· {p.kind.replace("-", "–")}</span>
+              {p.label} <span className="muted">· {KIND_LABEL[p.kind] ?? p.kind}</span>
             </dt>
             <dd>
               {loading ? (
@@ -105,9 +112,9 @@ export function VaultStats() {
           </dd>
         </div>
         <div>
-          <dt className="t-body">Yield</dt>
+          <dt className="t-body">Holders keep</dt>
           <dd className="t-data">
-            Pool fees ({HOLDERS_FEE_PCT}% compounds) · rebalancing · arbitrage ({100 - VAULT.arbFeeBps / 100}% kept)
+            {HOLDERS_FEE_PCT}% of pool fees · {100 - VAULT.arbFeeBps / 100}% of arbitrage profit
           </dd>
         </div>
         <div>

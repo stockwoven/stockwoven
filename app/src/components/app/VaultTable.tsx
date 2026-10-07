@@ -54,7 +54,7 @@ export function VaultTable() {
               <span className="t-body">SpaceX</span>
             </td>
             <td>
-              <span className="td-label t-eyebrow">Composition</span>
+              <span className="td-label t-eyebrow">Exposure</span>
               {exp ? (
                 <span className="t-data">
                   SpaceX {pct(exp.stock)} · USDC {pct(exp.usdc)} · SOL {pct(exp.sol)}
@@ -64,7 +64,7 @@ export function VaultTable() {
               )}
             </td>
             <td className="num">
-              <span className="td-label t-eyebrow">Backing</span>
+              <span className="td-label t-eyebrow">Value per token</span>
               {state ? <span className="t-data">{usd(vaultValue(state).perShare)}</span> : <Skel w={12} />}
             </td>
             <td className="num">
@@ -91,11 +91,11 @@ export function VaultTable() {
                 <span className="t-body muted">{v.stock}</span>
               </td>
               <td>
-                <span className="td-label t-eyebrow">Composition</span>
+                <span className="td-label t-eyebrow">Exposure</span>
                 <span className="t-data muted">—</span>
               </td>
               <td className="num">
-                <span className="td-label t-eyebrow">Backing</span>
+                <span className="td-label t-eyebrow">Value per token</span>
                 <span className="t-data muted">—</span>
               </td>
               <td className="num">

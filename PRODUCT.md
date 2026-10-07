@@ -8,7 +8,10 @@ web
 
 ## Users
 
-Product leads, CTOs and heads of investments at neobanks and fintechs who want to give their customers tokenized stocks. They use the devnet app to see the vault work end to end before integrating it. Their end users are "your customers"; Stockwoven has no end users of its own.
+Two audiences, both served by the same vault:
+
+- **Investors who hold tokenized stocks.** They use the Stockwoven app directly to deposit, follow the value of their sw token and redeem.
+- **Partners: product leads, CTOs and heads of investments at neobanks and fintechs** who want to give their customers tokenized stocks under their own brand through the SDK. They use the devnet app to see the vault work end to end before integrating it; their end users are their own customers.
 
 ## Product Purpose
 
