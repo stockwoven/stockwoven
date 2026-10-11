@@ -1,12 +1,14 @@
-// Screenshot harness: mocks devnet RPC (HTTP + WebSocket), the faucet route and a Wallet Standard wallet,
-// so every state renders the same way on every run.
+// Screenshot harness: a Wallet Standard test wallet over the live devnet vault. Reads of the vault go
+// to devnet, so the pages show its real state; the wallet's balances, history, faucet drips and
+// transactions are made up, so every wallet state renders the same way on every run.
 //   npm run build && PORT=3100 npm start
 //   CHROMIUM=/usr/bin/chromium node scripts/screenshots.mjs [pages|states]
 import { chromium } from "playwright-core";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Keypair } from "@solana/web3.js";
+import { Keypair, PublicKey } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import bs58 from "bs58";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,41 +26,23 @@ const FX = {
 const WIDTHS = process.env.W ? [Number(process.env.W)] : [320, 375, 768, 1024, 1440, 1920];
 const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
-// Pool: 1,234.5 mINTCx + 1,236.1 mINTC, NAV ≈ 1.000412 INTC per swINTC.
-const reserveA = 123_450_000_000n;
-const reserveB = 1_236_100_000n;
-const stock = 1234.5 + 1236.1;
-const nav = 1.000412;
-const lps = BigInt(DEVNET.liquidityPerShare);
-const liquidity = BigInt(Math.round((Number(lps) * 1e8 * stock) / nav / 1e12)) * 10n ** 12n;
-const supply = BigInt(Math.round((stock / nav) * 1e8));
+// The vault itself is read live from devnet: pools, positions, reserves and the basket render as
+// they are. Only the test wallet is made up: its token balances, its SOL, its history, and every
+// transaction it sends (which "confirms" without touching the chain).
+const ASSET_ATAS = DEVNET.assets.map((a) => getAssociatedTokenAddressSync(new PublicKey(a.mint), user, true, new PublicKey(a.tokenProgram)).toBase58());
+const SHARE_ATA = getAssociatedTokenAddressSync(new PublicKey(DEVNET.shareMint), user, true).toBase58();
+const SYMBOL = Object.fromEntries(DEVNET.assets.map((a) => [a.symbol, a]));
 
-function poolData() {
-  const b = Buffer.alloc(1112);
-  b.writeBigUInt64LE(liquidity & ((1n << 64n) - 1n), 360);
-  b.writeBigUInt64LE(liquidity >> 64n, 368);
-  b.writeBigUInt64LE(reserveA, 680);
-  b.writeBigUInt64LE(reserveB, 688);
-  return b.toString("base64");
-}
-// The vault's position holds the liquidity behind every swINTC.
-function positionData() {
-  const b = Buffer.alloc(408);
-  const vaultLiquidity = supply * lps;
-  b.writeBigUInt64LE(vaultLiquidity & ((1n << 64n) - 1n), 152);
-  b.writeBigUInt64LE(vaultLiquidity >> 64n, 160);
-  return b.toString("base64");
-}
-// A route pool against USDC: 200 shares of stock for 4,000 USDC, or 2 SOL for 300 USDC.
-function routePoolData(tokenDecimals, units = 200n, usdc = 4_000_000_000n) {
-  const b = Buffer.alloc(1112);
-  b.writeBigUInt64LE(units * 10n ** BigInt(tokenDecimals), 680);
-  b.writeBigUInt64LE(usdc, 688);
-  return b.toString("base64");
-}
-function tokenAccount(amount) {
+/** Whole tokens the test wallet holds, per asset symbol and for the share token. */
+const HOLDINGS = { SPCXx: 8.75, SPCX: 9.25, SPCXon: 7.5, USDC: 1_250, SOL: 0, swSPCX: 1.234567 };
+const EMPTY = { SPCXx: 10, SPCX: 10, SPCXon: 10, USDC: 2_000, SOL: 0, swSPCX: 0 };
+
+function tokenAccount(mint, raw) {
   const b = Buffer.alloc(165);
-  b.writeBigUInt64LE(BigInt(amount), 64);
+  new PublicKey(mint).toBuffer().copy(b, 0);
+  user.toBuffer().copy(b, 32);
+  b.writeBigUInt64LE(BigInt(raw), 64);
+  b[108] = 1; // initialized
   return b.toString("base64");
 }
 const account = (data, owner = TOKEN_PROGRAM) => ({
@@ -71,38 +55,48 @@ const account = (data, owner = TOKEN_PROGRAM) => ({
 });
 const ctx = (value) => ({ context: { slot: 1 }, value });
 
+/** The fake account for one of the test wallet's token accounts, or undefined for anything else. */
+function walletAccount(address, opts) {
+  const hold = opts.empty ? EMPTY : HOLDINGS;
+  const k = ASSET_ATAS.indexOf(address);
+  if (k >= 0) {
+    const a = DEVNET.assets[k];
+    return hold[a.symbol] ? account(tokenAccount(a.mint, Math.round(hold[a.symbol] * 10 ** a.decimals))) : null;
+  }
+  if (address === SHARE_ATA) return hold.swSPCX ? account(tokenAccount(DEVNET.shareMint, Math.round(hold.swSPCX * 1e8))) : null;
+  return undefined;
+}
+
 const ACTIVITY = [
-  { kind: "deposit", t: 0, d: { S: 2.5, A: -1.2496, B: -1.2512 } },
-  { kind: "convert", t: 1, d: { A: -1, B: 0.998903 } },
-  { kind: "redeem", t: 2, d: { S: -0.5, A: 0.2499, B: 0.2502 } },
-  { kind: "faucet", t: 3, d: { A: 10, B: 10 } },
-  { kind: "deposit-failed", t: 4, d: {}, err: true },
+  { t: 0, d: { swSPCX: 2.5, USDC: -575 } },
+  { t: 1, d: { SPCXx: -1, SPCXon: 0.998903 } },
+  { t: 2, d: { swSPCX: -0.5, SPCXx: 0.2499, SPCX: 0.2502, USDC: 22.4 } },
+  { t: 3, d: { SPCXx: 10, SPCX: 10, SPCXon: 10, USDC: 2_000 } },
+  { t: 4, d: {}, err: true },
 ];
 
 function parsedTx(i) {
   const a = ACTIVITY[i];
-  const mints = { A: [DEVNET.mintA, 8], B: [DEVNET.mintB, 6], S: [DEVNET.shareMint, 8] };
-  const bal = (key, amt) => ({
-    accountIndex: 1,
-    mint: mints[key][0],
-    owner: FX.user,
-    programId: TOKEN_PROGRAM,
-    uiTokenAmount: {
-      amount: String(Math.round(amt * 10 ** mints[key][1])),
-      decimals: mints[key][1],
-      uiAmount: amt,
-      uiAmountString: String(amt),
-    },
-  });
+  const meta = (sym) => (sym === "swSPCX" ? [DEVNET.shareMint, 8] : [SYMBOL[sym].mint, SYMBOL[sym].decimals]);
+  const bal = (sym, amt, index) => {
+    const [mint, decimals] = meta(sym);
+    return {
+      accountIndex: index,
+      mint,
+      owner: FX.user,
+      programId: TOKEN_PROGRAM,
+      uiTokenAmount: { amount: String(Math.round(amt * 10 ** decimals)), decimals, uiAmount: amt, uiAmountString: String(amt) },
+    };
+  };
   const pre = [], post = [];
-  for (const [k, v] of Object.entries(a.d)) {
-    pre.push(bal(k, 20));
-    post.push(bal(k, 20 + v));
-  }
+  Object.entries(a.d).forEach(([sym, v], j) => {
+    pre.push(bal(sym, 20, j + 1));
+    post.push(bal(sym, 20 + v, j + 1));
+  });
   return {
     slot: 100 - i,
-    blockTime: 1_791_200_000 - i * 3600,
-    version: "legacy",
+    blockTime: Math.floor(Date.now() / 1000) - (i + 1) * 3600,
+    version: 0,
     transaction: {
       signatures: [FX.sigs[i]],
       message: {
@@ -124,29 +118,14 @@ function parsedTx(i) {
   };
 }
 
-function rpc(method, params, opts) {
-  switch (method) {
-    case "getAccountInfo":
-      return ctx(account(poolData(), "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG"));
-    case "getTokenSupply":
-      return ctx({ amount: String(supply), decimals: 8, uiAmount: Number(supply) / 1e8, uiAmountString: String(Number(supply) / 1e8) });
-    case "getMultipleAccounts": {
-      if (params[0][0] === DEVNET.pool) {
-        const cpAmm = "cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG";
-        return ctx([
-          account(poolData(), cpAmm),
-          account(positionData(), cpAmm),
-          account(routePoolData(DEVNET.decimalsA), cpAmm),
-          account(routePoolData(DEVNET.decimalsB), cpAmm),
-          account(routePoolData(9, 2n, 300_000_000n), cpAmm),
-        ]);
-      }
-      const [a, b, s, u] = opts.empty ? [10e8, 10e6, 0, 100e6] : [8.75 * 1e8, 9.25 * 1e6, 12.345678 * 1e8, 64.5e6];
-      return ctx([account(tokenAccount(a)), account(tokenAccount(b)), account(tokenAccount(s)), account(tokenAccount(u))]);
-    }
+/** The answer for requests about the test wallet or its transactions; undefined sends it to devnet. */
+function local(r, opts) {
+  const [first] = r.params ?? [];
+  switch (r.method) {
     case "getBalance":
-      return ctx(opts.empty ? 20_000_000 : 1_482_000_000);
+      return first === FX.user ? ctx(opts.empty ? 20_000_000 : 1_482_000_000) : undefined;
     case "getSignaturesForAddress":
+      if (first !== FX.user) return undefined;
       return opts.empty
         ? []
         : ACTIVITY.map((a, i) => ({
@@ -154,31 +133,57 @@ function rpc(method, params, opts) {
             slot: 100 - i,
             err: a.err ? { InstructionError: [0, "Custom"] } : null,
             memo: null,
-            blockTime: 1_791_200_000 - i * 3600,
+            blockTime: Math.floor(Date.now() / 1000) - (i + 1) * 3600,
             confirmationStatus: "finalized",
           }));
     case "getTransaction":
-      return parsedTx(FX.sigs.indexOf(params[0]));
-    case "getLatestBlockhash":
-      return ctx({ blockhash: FX.blockhash, lastValidBlockHeight: 1_000_000 });
-    case "getBlockHeight":
-      return 10;
+      return FX.sigs.includes(first) ? parsedTx(FX.sigs.indexOf(first)) : undefined;
+    case "sendTransaction":
+      return FX.sigs[5];
+    case "simulateTransaction":
+      return ctx({ err: null, logs: [], accounts: null, unitsConsumed: 200_000, returnData: null });
     case "getSignatureStatuses":
-      return ctx([{ slot: 1, confirmations: null, err: null, confirmationStatus: "confirmed" }]);
+      return ctx(first.map(() => ({ slot: 1, confirmations: null, err: null, confirmationStatus: "confirmed" })));
+    case "getAccountInfo": {
+      const fake = walletAccount(first, opts);
+      return fake === undefined ? undefined : ctx(fake);
+    }
     default:
-      return null;
+      return undefined;
   }
 }
 
 async function mock(page, opts = {}) {
-  await page.route(/api\.devnet\.solana\.com/, async (route) => {
+  // A page closed while a live read is still in flight is not an error.
+  await page.route(/api\.devnet\.solana\.com/, (route) => answer(route).catch(() => {}));
+  async function answer(route) {
     if (opts.rpc === "hang") return; // never answers: loading state
     if (opts.rpc === "error") return route.fulfill({ status: 503, body: "Service Unavailable" });
     const body = JSON.parse(route.request().postData() || "{}");
-    const one = (r) => ({ jsonrpc: "2.0", id: r.id, result: rpc(r.method, r.params, opts) });
-    const res = Array.isArray(body) ? body.map(one) : one(body);
-    await route.fulfill({ contentType: "application/json", body: JSON.stringify(res) });
-  });
+    const calls = Array.isArray(body) ? body : [body];
+    const answers = calls.map((r) => local(r, opts));
+    const remote = calls.filter((_, i) => answers[i] === undefined);
+    let fetched = [];
+    if (remote.length) {
+      const res = await route.fetch({ postData: JSON.stringify(remote) });
+      fetched = await res.json();
+      if (!Array.isArray(fetched)) fetched = [fetched];
+    }
+    const out = calls.map((r, i) => {
+      if (answers[i] !== undefined) return { jsonrpc: "2.0", id: r.id, result: answers[i] };
+      const got = fetched.find((f) => f.id === r.id);
+      // The test wallet's token accounts inside a batch read.
+      if (r.method === "getMultipleAccounts" && got?.result?.value) {
+        got.result.value = got.result.value.map((v, j) => {
+          const fake = walletAccount(r.params[0][j], opts);
+          return fake === undefined ? v : fake;
+        });
+      }
+      return got;
+    });
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(Array.isArray(body) ? out : out[0]) });
+  }
+  // Only the wallet's confirmations go over the WebSocket; they confirm at once.
   await page.routeWebSocket(/api\.devnet\.solana\.com/, (ws) => {
     ws.onMessage((raw) => {
       const m = JSON.parse(raw);
@@ -353,7 +358,11 @@ try {
       await shot("tx-confirmed", "app", { connected: true }, deposit, "#vault-panel");
       await shot("tx-failed", "app", { connected: true, mode: "reject" }, deposit, "#vault-panel");
       await shot("redeem-tab", "app", { connected: true }, (p) => p.click("#tab-redeem"), "#vault-panel");
-      await shot("deposit-single", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=mINTCx"), "#vault-panel");
+      await shot("redeem-usdc", "app", { connected: true }, async (p) => {
+        await p.click("#tab-redeem");
+        await p.click("#vault-tabpanel [aria-pressed] >> text=USDC");
+      }, "#vault-panel");
+      await shot("deposit-single", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=SPCXon"), "#vault-panel");
       await shot("deposit-usdc", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=USDC"), "#vault-panel");
       await shot("deposit-sol", "app", { connected: true }, (p) => p.click("#vault-tabpanel [aria-pressed] >> text=SOL"), "#vault-panel");
       await shot("portfolio-empty", "app/portfolio", { connected: true, empty: true }, null, ".app-main");

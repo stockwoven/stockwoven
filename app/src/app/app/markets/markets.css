@@ -88,7 +88,7 @@
 }
 
 .seg button {
-  min-height: 36px;
+  min-height: 44px;
   padding-inline: var(--space-3);
   border: 0;
   border-radius: var(--radius-pill);
@@ -122,7 +122,8 @@
   }
 }
 
-.figure__note {
+/* Notes are prose: they wrap, unlike the figures above them (.figure dd). */
+.figure .figure__note {
   white-space: normal;
 }
 
@@ -134,7 +135,7 @@
 .stock-link {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
+  min-height: 44px;
   padding: 0;
   border: 0;
   background: none;

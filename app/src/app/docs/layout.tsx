@@ -13,13 +13,13 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
       </a>
       <DocsHeader index={searchIndex()} />
       <div className="wrap wrap--wide docs-shell">
-        <aside className="docs-sidebar">
+        <aside className="docs-sidebar" aria-label="Documentation pages">
           <DocsNav />
         </aside>
         <main id="main" className="docs-main">
           {children}
         </main>
-        <aside className="docs-aside">
+        <aside className="docs-aside" aria-label="On this page">
           <Toc />
         </aside>
       </div>

@@ -24,9 +24,13 @@ The keeper chooses sizes and prices for rebalances, reserve swaps and arbitrage.
 - `vault_swap` and `rebalance_remove` take minimum amounts that bound the price;
 - an arbitrage cycle only lands if the vault ends with more of the token it started from, and every other reserve ends where it started.
 
-## No oracle, no donation attack
+## No oracle for the mix, no donation attack
 
-Deposits and redemptions are priced by cp-amm's own `L × reserve / L_total` rule and plain fractions of the reserves, rounding against the user. Only the vault can add liquidity to its positions.
+Deposits with the mix and redemptions in kind are priced by cp-amm's own `L × reserve / L_total` rule and plain fractions of the reserves, rounding against the user. Only the vault can add liquidity to its positions.
+
+## Single-token trades and the keeper's prices
+
+Depositing or redeeming one token values USDC and SOL at prices the keeper posts. A keeper that stops posting, or posts prices more than 2% away from the vault's own pools, stops single-token trades; it can't make them mint more. Inside the band, the vault still takes an issuer token that trades up to 2% cheap at par: the dynamic fee and the 40% cap per issuer limit how much of it comes in.
 
 ## Devnet only
 

@@ -56,8 +56,9 @@ export function VaultTable() {
             <td>
               <span className="td-label t-eyebrow">Exposure</span>
               {exp ? (
-                <span className="t-data">
-                  SpaceX {pct(exp.stock)} · USDC {pct(exp.usdc)} · SOL {pct(exp.sol)}
+                <span className="t-data wraps">
+                  <span className="nowrap">SpaceX {pct(exp.stock)}</span> · <span className="nowrap">USDC {pct(exp.usdc)}</span> ·{" "}
+                  <span className="nowrap">SOL {pct(exp.sol)}</span>
                 </span>
               ) : (
                 <Skel w={20} />

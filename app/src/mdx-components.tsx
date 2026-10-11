@@ -33,8 +33,14 @@ const components: MDXComponents = {
   td: ({ children }) => <td>{tickers(children)}</td>,
   strong: ({ children }) => <strong>{tickers(children)}</strong>,
   code: ({ children }) => <code className="t-data">{children}</code>,
+  // Named by its first line, so several code blocks on a page stay distinguishable.
+  pre: ({ children }) => (
+    <pre className="doc-pre" tabIndex={0} role="region" aria-label={`Code: ${text(children).trim().split("\n")[0].slice(0, 60)}`}>
+      {children}
+    </pre>
+  ),
   table: ({ children }) => (
-    <div className="doc-table">
+    <div className="doc-table" tabIndex={0} role="region" aria-label="Table">
       <table className="t-body">{children}</table>
     </div>
   ),

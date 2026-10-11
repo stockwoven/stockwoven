@@ -46,7 +46,7 @@ A share is a pro-rata claim on everything the vault holds: its position liquidit
 
 This has four consequences:
 
-- **No oracle, no NAV math on-chain.** cp-amm's own `L × reserve / L_total` rule prices the liquidity part, and the idle part is a plain fraction of a balance. Every rounding favours the vault.
+- **No oracle for the mix.** cp-amm's own `L × reserve / L_total` rule prices the liquidity part, and the idle part is a plain fraction of a balance. Every rounding favours the vault. Only single-token deposits and redemptions use prices: the keeper's, inside a 2% band around the pools (see [Deposit](/docs/deposit#deposit-with-one-token)).
 - **No donation or inflation attack on the liquidity.** Only the vault can add liquidity to its positions. A token sent to a reserve is split among all holders like any other idle balance.
 - **The keeper can't change the share count.** Rebalancing and arbitrage move value between positions and reserves inside the vault. Holders can deposit or redeem between any two keeper steps.
 - **Dust.** Redeeming a few raw share units can pay out zero of a token. If cp-amm rejects that, the transaction fails and the holder keeps the shares.

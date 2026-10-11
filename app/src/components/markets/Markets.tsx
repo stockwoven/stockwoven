@@ -229,7 +229,7 @@ function Overview({ tape, scope, scopeLabel, selected, onPick }: { tape: Tape; s
         <Figure label="Off-hours" value={percent(total ? off / total : null)} unit="of volume" note="pre, after, overnight, weekend" />
         <Figure label="Choosing the issuer" value={saved == null ? "—" : bps(saved - (noise ?? 0))} unit="bps" note={saved == null ? "no comparisons in range" : `${saved.toFixed(1)} bps saved, ${noise?.toFixed(1)} in the placebo`} />
       </dl>
-      <div className="table-scroll">
+      <div className="table-scroll" tabIndex={0} role="region" aria-label="Stocks table">
         <table className="table table--dense markets-table">
           <caption className="sr-only">Stocks in range. Choose one to see its tape.</caption>
           <thead>
@@ -418,7 +418,7 @@ function StockDetail({
           <h3 className="t-label">By token and session</h3>
           <span className="t-eyebrow muted">p10 · p25–p75 · median · p90</span>
         </div>
-        <div className="table-scroll">
+        <div className="table-scroll" tabIndex={0} role="region" aria-label="Premium by token and session">
           <table className="table table--dense markets-table">
             <caption className="sr-only">Premium distribution of each token in each session</caption>
             <thead>
@@ -488,7 +488,7 @@ function StockDetail({
         {rows.length === 0 ? (
           <p className="t-body muted">No trades in this range.</p>
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="Tape">
             <table className="table table--dense markets-table">
               <caption className="sr-only">Every 15-minute interval this stock&apos;s tokens traded in, newest first</caption>
               <thead>

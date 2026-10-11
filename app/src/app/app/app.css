@@ -61,19 +61,27 @@
 
 .tabs--sources {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   align-self: stretch;
 }
 
-@container (min-width: 440px) {
+@container (min-width: 280px) {
   .tabs--sources {
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* One row once every label fits on one line; never a lone option on a second row. */
+@container (min-width: 600px) {
+  .tabs--sources {
+    grid-template-columns: repeat(var(--options, 5), 1fr);
   }
 }
 
 .tabs--sources button {
   min-width: 0;
   padding-inline: var(--space-2);
+  white-space: nowrap;
 }
 
 .tabs button[aria-pressed="true"] {

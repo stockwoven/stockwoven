@@ -10,7 +10,9 @@ Mostly, not entirely. The vault holds USDC and SOL inside its SPCX / USDC and SP
 
 ## Is there a price oracle?
 
-No. A share is a pro-rata slice of every position and every reserve, and cp-amm's own `L × reserve / L_total` rule prices the liquidity part. See [How the vault works](/docs/how-the-vault-works#share-accounting).
+Not for the mix. Depositing the mix and redeeming in kind use no price: a share is a pro-rata slice of every position and every reserve, and cp-amm's own `L × reserve / L_total` rule prices the liquidity part. See [How the vault works](/docs/how-the-vault-works#share-accounting).
+
+Depositing or redeeming one token values the vault in SpaceX shares: issuer tokens at 1:1, USDC and SOL at prices the keeper posts. Those trades stop if the prices are more than 10 minutes old or a vault pool trades more than 2% away from them. See [Deposit](/docs/deposit#when-a-token-is-not-accepted-alone).
 
 ## Can I deposit with just one token?
 
@@ -26,7 +28,7 @@ No. The vault can pause deposits, never redemptions. Issuer powers are a separat
 
 ## What can the keeper do?
 
-Move liquidity between the vault's pools, swap between its reserves and run arbitrage cycles. It is trusted to choose sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage must leave the vault with more. See [How the vault works](/docs/how-the-vault-works#rebalancing).
+Move liquidity between the vault's pools, swap between its reserves, run arbitrage cycles and post the prices single-token trades use. It is trusted to choose sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage must leave the vault with more. See [How the vault works](/docs/how-the-vault-works#rebalancing).
 
 ## How does Stockwoven make money?
 

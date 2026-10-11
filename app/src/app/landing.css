@@ -11,7 +11,7 @@
 }
 
 .section__head p {
-  max-width: 60ch;
+  max-width: 50ch;
   text-wrap: pretty;
 }
 
@@ -182,7 +182,7 @@
 
 .partners p,
 .partner-sample p {
-  max-width: 60ch;
+  max-width: 50ch;
 }
 
 .partner-sample {
@@ -228,6 +228,11 @@
   list-style: none;
 }
 
+.faq__q {
+  flex: 1;
+  min-width: 0;
+}
+
 .faq summary::-webkit-details-marker {
   display: none;
 }
@@ -257,7 +262,7 @@
 }
 
 .faq details p {
-  max-width: 60ch;
+  max-width: 50ch;
   margin: 0;
 }
 

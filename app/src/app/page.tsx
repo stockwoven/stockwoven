@@ -22,7 +22,7 @@ const POOLS = ["SPCXx / SPCX", "SPCXon / SPCXx", "SPCX / USDC", "SPCXx / SOL"];
 const STEPS = [
   {
     title: "Deposit",
-    text: "Hand over the vault's current mix, or pay with one token (USDC, SOL or any issuer's SpaceX) and the app swaps it into the mix in the same transaction. Receive swSPCX.",
+    text: "Hand over the vault's current mix, or pay with one token. Any issuer's SpaceX counts 1:1; USDC and SOL are converted by the vault into the issuer token it holds least of. Receive swSPCX.",
   },
   {
     title: "Hold",
@@ -30,7 +30,7 @@ const STEPS = [
   },
   {
     title: "Redeem",
-    text: "Burn swSPCX and take your slice of every token back, or let the app swap it all to USDC in the same transaction. The vault never pauses redemptions.",
+    text: "Burn swSPCX and take your slice of every token back, or receive one issuer token or USDC in a single transaction. The vault never pauses redemptions in kind.",
   },
 ];
 
@@ -85,7 +85,7 @@ const FAQ = [
   },
   {
     q: "Is there a price oracle?",
-    a: "No. A share is a pro-rata slice of every position and every reserve, and Meteora's own pool math prices the liquidity part, rounding against the user. Only the vault can add liquidity to its positions.",
+    a: "Not for the mix. Depositing the mix and redeeming in kind use no price: a share is a pro-rata slice of every position and reserve. Single-token trades value USDC and SOL at prices the keeper posts, and stop if they are over 10 minutes old or a vault pool trades more than 2% away from them.",
     href: "/docs/how-the-vault-works#share-accounting",
   },
   {
@@ -95,7 +95,7 @@ const FAQ = [
   },
   {
     q: "What can the keeper do?",
-    a: "Move liquidity between the vault's pools, swap between its reserves and run arbitrage cycles. It is trusted to pick sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage is checked on-chain.",
+    a: "Move liquidity between the vault's pools, swap between its reserves, run arbitrage cycles and post the prices single-token trades use. It is trusted to pick sizes and prices, but it can't mint swSPCX or move funds out of the vault, and every arbitrage is checked on-chain.",
     href: "/docs/how-the-vault-works#rebalancing",
   },
   {
@@ -357,7 +357,10 @@ export default function Landing() {
               {FAQ.map((f) => (
                 <details key={f.q}>
                   <summary className="t-label">
-                    <WithTickers>{f.q}</WithTickers>
+                    {/* One flex item, so a ticker chip inside the question doesn't split it into columns. */}
+                    <span className="faq__q">
+                      <WithTickers>{f.q}</WithTickers>
+                    </span>
                   </summary>
                   <p className="t-body body">
                     <WithTickers>{f.a}</WithTickers>

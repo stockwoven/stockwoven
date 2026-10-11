@@ -41,6 +41,10 @@ At most one line of microcopy per field or action. Anything longer is a `LearnMo
 
 - **Responsive display type.** `tokens.css` has classes but no size variables. `Display` renders both scale steps and shows one per breakpoint, so no in-between sizes exist.
 - **Big numbers.** Stat values use Bricolage (`sw-stat__value`, "big numbers"), with the unit in `t-data` mono. Balances, quotes, addresses and table figures use mono with `tabular-nums`.
+- **Data colors (Markets only).** The design system has one accent and no data palette. The Markets charts use five categorical slots, one per issuer and fixed everywhere a token appears: xStocks blue `#2a78d6`, Backpack orange `#eb6834`, Tessera aqua `#1baf7a`, PreStocks yellow `#eda100`, Ondo magenta `#e87ba4`. The diverging premium scale runs blue (`#2a78d6`, below fair value) to red (`#e34948`, above). They live as custom properties on `.app-main` in `markets.css` and never appear outside charts and their legends. Purple never marks data.
+- **Touch targets.** Every control that is tapped is at least 44px tall: buttons, segmented filters, the amount input, header brand links, the docs "On this page" links. Small labels that are links (the docs chip) get a 44px hit area through `::after` without changing how they look.
+- **Option groups.** "Pay with" and "Receive" sit in two columns on the narrowest panels, three from 280px and one row (`--options` columns) from 600px, so a label never wraps and an option never ends alone on a second row.
+- **Scrolling regions.** Tables and code blocks that scroll sideways take keyboard focus (`tabIndex 0`, a region label, the accent focus ring).
 - **Status colors.** The system has no success or error colors. Transaction states differ by word and treatment:
   - Pending: purple outline.
   - Confirmed: line outline.
@@ -51,4 +55,4 @@ At most one line of microcopy per field or action. Anything longer is a `LearnMo
 
 ## Verification
 
-`npm run build && PORT=3100 npm start`, then `CHROMIUM=/usr/bin/chromium npm run screenshots`. This captures every page of the three areas at 320, 375, 768, 1024, 1440 and 1920, plus the app states, using mocked RPC and a mock Wallet Standard wallet. It also runs the flow landing → Launch app → connect → deposit → portfolio → redeem. Results go to `screenshots/` (`report.json` for overflow, `flow.json` for the flow).
+`npm run build && PORT=3100 npm start`, then `CHROMIUM=/usr/bin/chromium npm run screenshots` (on Windows, `CHROMIUM="C:/Program Files/Google/Chrome/Application/chrome.exe"`). This captures every page of the three areas at 320, 375, 768, 1024, 1440 and 1920, plus the app states, with a test Wallet Standard wallet over the live devnet vault: the vault's accounts are read from devnet, while the wallet's balances, history and transactions are made up. It also runs the flow landing → Launch app → connect → deposit → portfolio → redeem. Results go to `screenshots/` (`report.json` for overflow, `flow.json` for the flow).

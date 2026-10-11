@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useState } from "react";
+import { CSSProperties, KeyboardEvent, useState } from "react";
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useSend } from "@/lib/hooks";
@@ -241,8 +241,9 @@ export function VaultPanel() {
       if (single.redirect === "depeg") return `${input.symbol} trades outside its ${percent(band)} band, so it goes in as ${into}.`;
       return `${input.symbol} goes in alone, counted 1:1 as SpaceX. The fee depends on how far ${input.symbol} sits from its target weight in the vault.`;
     }
-    const swap = `${input.symbol} is swapped into each token the vault holds, in the vault's proportions, then deposited.`;
-    return inFallback ? `${inFallback} So ${swap.charAt(0).toLowerCase()}${swap.slice(1)}` : swap;
+    const route = `${input.symbol} is swapped into each token the vault holds, in the vault's proportions, then deposited.`;
+    // The fallback reason is its own sentence; the route follows it without rewriting either.
+    return inFallback ? `${inFallback} This deposit takes the longer route: ${route}` : route;
   }
 
   function redeemNote() {
@@ -252,8 +253,8 @@ export function VaultPanel() {
       const sold = outPlan.asset !== output ? ` The same transaction sells it for ${ASSETS[output].symbol}.` : "";
       return `The vault pays your share of its value in ${paid}, less a fee that is higher when ${paid} sits below its target weight.${sold} In kind stays open whatever happens.`;
     }
-    const swap = `Your slice of every pool and reserve comes out, then each token is swapped to ${ASSETS[output].symbol}.`;
-    return outFallback ? `${outFallback} So ${swap.charAt(0).toLowerCase()}${swap.slice(1)}` : swap;
+    const route = `every pool and reserve pays out your slice, then each token is swapped to ${ASSETS[output].symbol}.`;
+    return outFallback ? `${outFallback} This redemption takes the longer route: ${route}` : `In kind first: ${route}`;
   }
 
   return (
@@ -284,7 +285,12 @@ export function VaultPanel() {
           <span className="t-label" id="choice">
             {deposit ? "Pay with" : "Receive"}
           </span>
-          <div className="tabs tabs--sources" role="group" aria-labelledby="choice">
+          <div
+            className="tabs tabs--sources"
+            role="group"
+            aria-labelledby="choice"
+            style={{ "--options": deposit ? SOURCES.length : PAYOUTS.length } as CSSProperties}
+          >
             {deposit
               ? SOURCES.map((s) => (
                   <button key={String(s.key)} type="button" className="t-label" aria-pressed={source === s.key} onClick={() => pickSource(s.key)}>

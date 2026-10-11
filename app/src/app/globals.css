@@ -274,6 +274,21 @@ a.sw-lockup {
   text-decoration: none;
 }
 
+/* The brand link is a 44px target even when only the 24px mark shows; the extra hit area doesn't
+   take room in the header. */
+a.sw-lockup {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+a.sw-lockup::after {
+  content: "";
+  position: absolute;
+  inset: 0 -10px;
+}
+
 .header__brand {
   display: inline-flex;
   align-items: center;
@@ -285,6 +300,17 @@ a.sw-lockup {
 
 .header__wordmark {
   display: none;
+}
+
+/* The docs chip is a link: its hit area reaches 44px without changing how it looks. */
+a.chip-devnet {
+  position: relative;
+}
+
+a.chip-devnet::after {
+  content: "";
+  position: absolute;
+  inset: -10px -4px;
 }
 
 .chip-devnet {
@@ -693,6 +719,21 @@ main {
   flex-wrap: wrap;
 }
 
+.tile__head > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  max-width: 100%;
+}
+
+/* Regions that scroll sideways take keyboard focus (tabIndex 0), so arrow keys can scroll them. */
+.table-scroll:focus-visible,
+.doc-table:focus-visible,
+.doc-pre:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
 /* Two-part bar for the pool reserves: ink for issuer A, gray-ink for issuer B. */
 .split-bar {
   display: flex;
@@ -756,6 +797,12 @@ main {
 
 .kv dd .t-data {
   white-space: nowrap;
+}
+
+/* A list of figures breaks between items (each one is .nowrap), never inside one. */
+.kv dd .t-data.wraps,
+.t-data.wraps {
+  white-space: normal;
 }
 
 .key-swatch {
@@ -865,7 +912,9 @@ main {
 
 .field__box input {
   flex: 1;
+  align-self: stretch;
   min-width: 0;
+  min-height: 44px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -967,8 +1016,10 @@ main {
 }
 
 .banner summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   cursor: pointer;
-  min-height: 24px;
 }
 
 .banner .sw-btn--ghost {
