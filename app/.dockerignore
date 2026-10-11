@@ -1,0 +1,11 @@
+# Never send build output, dependencies, local env files or keys to the builder.
+node_modules
+.next
+.env*
+*.pem
+*keypair*.json
+id.json
+screenshots
+*.tsbuildinfo
+Dockerfile
+fly.toml

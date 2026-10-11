@@ -32,6 +32,8 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
   // Wallet extensions don't need popups to share this window, but a web wallet's popup may.
   { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+  // HTTPS only from the first visit on. Browsers ignore it over plain HTTP.
+  { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
 ];
 
 const nextConfig: NextConfig = {

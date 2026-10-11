@@ -5,8 +5,8 @@
 // Anyone can call it with any wallet, and a script can make wallets for free, so the per-wallet
 // limit alone would let one person drain the faucet's SOL (every new wallet costs it four token
 // accounts' rent plus the top-up). It therefore also has a budget for the whole server per hour,
-// keeps a SOL reserve it never spends, and only tops up wallets that hold no SOL at all. nginx adds
-// a per-IP limit in front (deploy/nginx/stockwoven.conf).
+// keeps a SOL reserve it never spends, only tops up wallets that hold no SOL at all, and limits each
+// visitor IP per hour (nginx adds its own per-IP limit in front, deploy/nginx/stockwoven.conf).
 
 import { readFileSync } from "node:fs";
 import { NextResponse } from "next/server";
@@ -40,7 +40,11 @@ const SOL_TOP_UPS_PER_HOUR = Number(process.env.FAUCET_SOL_TOP_UPS_PER_HOUR ?? 2
 const SOL_RESERVE = 0.3 * LAMPORTS_PER_SOL;
 const HOUR_MS = 3_600_000;
 
+/** Drips per visitor IP per hour, for hosts with no nginx in front (Fly.io). */
+const DRIPS_PER_IP_PER_HOUR = Number(process.env.FAUCET_DRIPS_PER_IP_PER_HOUR ?? 10);
+
 const lastDrip = new Map<string, number>();
+const byIp = new Map<string, number[]>();
 const drips: number[] = [];
 const topUps: number[] = [];
 
@@ -58,7 +62,16 @@ function prune(now: number) {
   if (lastDrip.size > 10_000) {
     for (const [k, t] of lastDrip) if (now - t > WALLET_COOLDOWN_MS) lastDrip.delete(k);
   }
+  if (byIp.size > 10_000) {
+    for (const [ip, ts] of byIp) if (now - ts[ts.length - 1] > HOUR_MS) byIp.delete(ip);
+  }
 }
+
+/**
+ * The visitor's IP as the proxy in front reports it: Fly's proxy sets Fly-Client-IP, nginx sets
+ * X-Real-IP. The server is only reachable through one of them, so the header can't be forged.
+ */
+const clientIp = (req: Request) => req.headers.get("fly-client-ip") ?? req.headers.get("x-real-ip") ?? "unknown";
 
 const refuse = (error: string, status: number) => NextResponse.json({ error }, { status });
 
@@ -83,9 +96,13 @@ export async function POST(req: Request) {
   const key = owner.toBase58();
   if (now - (lastDrip.get(key) ?? 0) < WALLET_COOLDOWN_MS) return refuse("one drip per minute", 429);
   if (drips.length >= DRIPS_PER_HOUR) return refuse("the faucet is busy; try again later", 429);
+  const ip = clientIp(req);
+  const fromIp = (byIp.get(ip) ?? []).filter((t) => now - t < HOUR_MS);
+  if (fromIp.length >= DRIPS_PER_IP_PER_HOUR) return refuse("the faucet is busy; try again later", 429);
   // Claimed before the transaction, so parallel requests for one wallet can't all pass.
   lastDrip.set(key, now);
   drips.push(now);
+  byIp.set(ip, [...fromIp, now]);
 
   try {
     const admin = adminKeypair();
