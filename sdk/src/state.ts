@@ -1,7 +1,8 @@
 // The vault's on-chain state in one RPC call: share supply, idle reserves, every vault pool with
-// the vault's position in it, the market pools, target weights and the pause flag.
+// the vault's position in it, the market pools, target weights, the pause flag and the basket.
 
 import { Connection } from "@solana/web3.js";
+import { Basket, basketAddress, decodeBasket } from "./basket.js";
 import { VaultConfig } from "./config.js";
 
 export type PoolState = { liquidity: bigint; reserveA: bigint; reserveB: bigint };
@@ -19,6 +20,8 @@ export type VaultState = {
   /** The keeper's target share of the vault's value per pool, in basis points. */
   weights: number[];
   depositsPaused: boolean;
+  /** Weights, caps, fee settings and the keeper's prices for single-token trades; null when the vault has no basket yet. */
+  basket?: Basket | null;
 };
 
 const u64 = (d: Uint8Array, o: number) => new DataView(d.buffer, d.byteOffset).getBigUint64(o, true);
@@ -42,6 +45,7 @@ export async function fetchVaultState(connection: Connection, cfg: VaultConfig):
     ...cfg.assets.map((a) => a.reserve),
     ...cfg.pools.flatMap((p) => [p.pool, p.position!]),
     ...cfg.marketPools.map((p) => p.pool),
+    basketAddress(cfg.program, cfg.vault),
   ];
   const { context, value } = await connection.getMultipleAccountsInfoAndContext(keys, "confirmed");
   const data = value.map((i) => (i ? new Uint8Array(i.data) : null));
@@ -63,6 +67,7 @@ export async function fetchVaultState(connection: Connection, cfg: VaultConfig):
     const d = data[k++];
     return d ? poolOf(d) : { liquidity: 0n, reserveA: 0n, reserveB: 0n };
   });
+  const basket = data[k++];
   return {
     slot: context.slot,
     supply: u64(mint, 36),
@@ -71,5 +76,6 @@ export async function fetchVaultState(connection: Connection, cfg: VaultConfig):
     market,
     weights: cfg.pools.map((_, i) => u16(vault, POOLS_OFFSET + i * POOL_SLOT_LEN + WEIGHT_IN_POOL)),
     depositsPaused: vault[PAUSED_OFFSET] === 1,
+    basket: basket ? decodeBasket(basket) : null,
   };
 }

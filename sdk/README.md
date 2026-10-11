@@ -58,11 +58,17 @@ for (const tx of signed) {
 | `pay` | The customer pays | Transactions | What happens |
 |---|---|---|---|
 | `"mix"` | every asset in the vault's current proportions, for an exact number of `shares` | 1 | Mints exactly `shares`. Takes at most `maxSpend` of each token and refunds the rest. SOL is wrapped and unwrapped in the same transaction. |
-| `"USDC"`, `"SOL"`, `"SPCXx"`, `"SPCX"`, `"SPCXon"` | one token, `amount` raw units | 2 | The first transaction swaps the token into each asset the vault holds, in the vault's proportions, through the best route of one or two pools. The second deposits them and mints exactly the quoted `shares`. Slices worth under $0.05 are not swapped: the wallet pays them from its own balance. |
+| `"SPCXx"`, `"SPCX"`, `"SPCXon"` | one issuer token, `amount` raw units | 1 | `route: "single"`. The vault takes it alone (`deposit_single`) and counts it 1:1 as one SpaceX share, less the dynamic fee. If the token is at its cap or outside its 1:1 band, the vault converts it on-chain into an underweight issuer token (`redirect: "cap"` or `"depeg"`). Mints at least `minShares`. |
+| `"USDC"`, `"SOL"` | one token, `amount` raw units | 1 | `route: "single"`, `redirect: "quote"`. The vault converts it on-chain, through the pool that mints the most, into an issuer token below its target weight. SOL is swapped to USDC first, in the same transaction, when no pool pairs it with one. |
+| any of the above, when the vault can't take it alone | one token | 2 | `route: "swap"`, the fallback. The first transaction swaps the token into each asset the vault holds, in the vault's proportions; the second deposits them and mints exactly `shares`. `fallbackReason` says why. |
 
-A one-token deposit is two transactions because, together, the swaps and the deposit exceed Solana's limit of 64 instructions and inner calls per transaction. Sign both, then send and confirm them in order (`sendAll` does it for a backend). If the second fails, the customer keeps the tokens the first one bought; quote again and deposit them with `pay: "mix"`.
+**The basket.** The vault keeps a target weight and a cap for each token (for example, at most 40% in one issuer). Its fee is dynamic: a deposit that leaves a token above its target pays more, and one below pays less, down to a small discount (`feeBps` is then negative). It is the same idea as Sanctum Infinity for LSTs and Curve for stablecoins: the fee keeps the vault balanced. The fee stays in the vault, for holders.
 
-Redeeming pays a slice of every asset in kind: `sw.quoteRedeem(shares)`. With `{ receive: "USDC" }` (or any asset), the same transaction swaps the rest into it. The vault never pauses redemptions.
+**The circuit breaker.** An issuer token counts 1:1 only while its market price stays within ±2% of the stock (`params.bandBps`). Outside that band, the vault stops taking it or paying it out alone. USDC and SOL are valued at prices the keeper posts. If those prices are older than `params.maxPriceAge`, or a vault pool trades outside the band around them, every single-token deposit and redemption pauses until they come back. The fallback route and in-kind redemptions keep working.
+
+A fallback deposit is two transactions because, together, the swaps and the deposit exceed Solana's limit of 64 instructions and inner calls per transaction. Sign both, then send and confirm them in order (`sendAll` does it for a backend). If the second fails, the customer keeps the tokens the first one bought; quote again and deposit them with `pay: "mix"`.
+
+**Redeeming.** By default, `sw.quoteRedeem(shares)` pays a slice of every asset in kind and needs no price. With `{ receive: "SPCXon" }` (any issuer token), the vault pays that token alone (`redeem_single`), less the dynamic fee: taking out a token below its target costs more. With `{ receive: "USDC" }` or `"SOL"`, the vault pays the issuer token that sells for the most, and the same transaction sells it, so a neobank customer just receives cash (`via` names that token). When the vault can't pay one token, the quote falls back to redeeming in kind and swapping everything into `receive` (`fallbackReason`). The vault never pauses in-kind redemptions.
 
 ## Concepts
 
@@ -81,12 +87,12 @@ Redeeming pays a slice of every asset in kind: `sw.quoteRedeem(shares)`. With `{
 | Method | Returns |
 |---|---|
 | `new Stockwoven({ connection, vault?, slippageBps?, routeSlippageBps?, maxLossBps?, computeUnits? })` | A client for one vault. Default: `DEVNET_SPCX`. |
-| `getVault()` | Share token, assets, `valuePerShare`, `sinceLaunch`, `totalValue`, `supply`, `exposure`, each pool's value and target weight, idle reserves, prices, pause flag. |
+| `getVault()` | Share token, assets, `valuePerShare`, `sinceLaunch`, `totalValue`, `supply`, `exposure`, each pool's value and target weight, idle reserves, prices, pause flag, and `basket`: per token `weightBps`, `targetWeightBps`, `maxWeightBps`, `pegged`, `priceVsShareBps`, `depositFeeBps` and `redeemFeeBps` at the margin, plus `pricesAgeSec` and the breaker `status` (`"open"`, `"stale"`, `"pool-out-of-band"`…) with a `reason`. Null when the vault has no basket. |
 | `getPosition(owner)` | Shares held, their USD value, and what redeeming them all in kind would pay now. |
 | `getActivity(owner, limit?)` | The owner's latest transactions, newest first: deposit, redeem, swap or other, with balance changes per token. |
-| `quoteDeposit(input)` | `route`, exact `shares`, `maxSpend` per token, `valueUsd`, `costUsd`. |
-| `quoteRedeem(shares, { receive? })` | The minimum payout per token (in kind) or of the one asset. |
-| `buildDeposit(quote, { owner, feePayer?, priorityFee? })` | Unsigned v0 `transactions` (one or two), the `signers` they need, `blockhash` and `lastValidBlockHeight`. |
+| `quoteDeposit(input)` | `route` (`"mix"`, `"single"` or `"swap"`), `shares`, `minShares`, `maxSpend` per token, `valueUsd`, `costUsd`; on `"single"` also `feeBps`, `into` and `redirect`; on `"swap"`, `fallbackReason`. |
+| `quoteRedeem(shares, { receive? })` | The minimum payout per token (in kind) or of the one asset; for one asset also `feeBps` and `via`, or `fallbackReason`. |
+| `buildDeposit(quote, { owner, feePayer?, priorityFee? })` | Unsigned v0 `transactions` (one, or two on the `"swap"` fallback), the `signers` they need, `blockhash` and `lastValidBlockHeight`. |
 | `buildRedeem(quote, { owner, feePayer?, priorityFee? })` | The same, for a redemption (one transaction). |
 | `buildHarvest(caller)` | Permissionless: sends every pool's protocol fee to the treasury. |
 | `sendAll(built, keypairs)` | Signs, sends and confirms each transaction in order; returns the signatures. |
@@ -94,7 +100,7 @@ Redeeming pays a slice of every asset in kind: `sw.quoteRedeem(shares)`. With `{
 | `asset(symbolOrKind)` | The index of an asset in `vault.assets`. |
 | `parseError(error)` | A `StockwovenError` with a `kind` you can branch on and a sentence for your own copy. |
 
-Lower level, for partners who build their own flows: the pure pricing functions (`prices`, `vaultValue`, `exposure`, `holdings`, `tokensForShares`, `sharesFor`, `swapOut`, `bestRoute`, `zapIn`, `zapOut`), the instruction builders (`depositIx`, `redeemIx`, `swapIx`, `harvestIx`, `wrapSolIxs`, `unwrapSolIx`) and `fetchVaultState`.
+Lower level, for partners who build their own flows: the pure pricing functions (`prices`, `vaultValue`, `exposure`, `holdings`, `tokensForShares`, `sharesFor`, `swapOut`, `bestRoute`, `zapIn`, `zapOut`), the basket's math, which mirrors the program (`planSingleDeposit`, `planSingleRedeem`, `planRedeemTo`, `breaker`, `dynamicFeeBps`, `decodeBasket`, `basketAddress`…), the instruction builders (`depositIx`, `redeemIx`, `depositSingleIx`, `redeemSingleIx`, `swapIx`, `harvestIx`, `wrapSolIxs`, `unwrapSolIx`) and `fetchVaultState`.
 
 ## Errors
 
@@ -111,6 +117,10 @@ try {
 |---|---|
 | `DepositsPaused` | The vault paused deposits (an issuer event). Redemptions still work. |
 | `SlippageExceeded`, `Slippage` | A pool moved past the limit. Quote again. |
+| `AssetAtCap`, `NotUnderweight` | The vault's weights moved since the quote. Quote again: the token will be converted into one the vault needs. |
+| `TokenDepegged` | The token left its 1:1 band; the vault won't take or pay it alone. Use another token, or redeem in kind. |
+| `PricesStale`, `PoolOutOfBand` | The circuit breaker paused single-token trades. Quote again (it falls back to the swap route), or redeem in kind. |
+| `InsufficientLiquidity` | The vault doesn't hold enough of that token. Choose another, or redeem in kind. |
 | `InsufficientFunds` | The owner lacks the tokens, or the fee payer lacks SOL. |
 | `TooManyInstructions` | A deposit's steps were merged into one transaction. Send each step on its own. |
 | `AccountMismatch`, `WrongAccountCount` | The vault changed (an asset or pool was added). Update the SDK's vault config. |

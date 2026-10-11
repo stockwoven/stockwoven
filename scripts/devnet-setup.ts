@@ -5,6 +5,8 @@
 //   SPCXx/SPCX and SPCXon/SPCXx (stock–stock), SPCX/USDC and SPCXx/SOL;
 // - two market pools that other people would own on mainnet (SPCXx/USDC and SPCXon/USDC), plus
 //   the existing wSOL/USDC pool, which the keeper arbitrages against;
+// - the basket: target weights, caps, the dynamic fee and the circuit breaker for single-token
+//   deposits and redemptions, with the first prices;
 // - the lookup table that fits deposits and redeems (~45 accounts) in one transaction.
 //
 //   KEYPAIR=//wsl.localhost/Ubuntu/home/pedro/.config/solana/id.json \
@@ -41,20 +43,28 @@ import {
   STOCKWOVEN,
   SHARE_DECIMALS,
   addAssetIx,
+  DEFAULT_BASKET,
   addPoolIx,
   admin,
   ata,
+  basketAddress,
+  basketPrices,
+  basketWeights,
   conn,
   createMarketPoolIx,
   hasDevnet,
+  initBasketIx,
   initializeVaultIx,
   loadKeypair,
   pk,
   poolAddresses,
   positionAddresses,
+  prices,
   readDevnet,
+  readState,
   reserveAddress,
   sendV0,
+  setPricesIx,
   shareMintAddress,
   sqrtPriceFor,
   vaultAddress,
@@ -240,12 +250,24 @@ async function addMarketPools(d: Devnet) {
   }
 }
 
+/** The basket, with targets that match the pools' weights and the keeper's first prices. */
+async function ensureBasket(d: Devnet) {
+  const basket = basketAddress(pk(d.vault));
+  if (!(await conn.getAccountInfo(basket))) {
+    const s = await readState(d);
+    await send([initBasketIx(d, DEFAULT_BASKET, basketWeights(d, s.weights)), setPricesIx(d, basketPrices(d, prices(d, s)))]);
+    log("basket", basket.toBase58());
+  }
+  d.basket = basket.toBase58();
+  writeDevnet(d);
+}
+
 /** Every vault-owned and fixed account, so deposits and redeems carry one byte per account. */
 async function ensureLookupTable(d: Devnet) {
   const wanted = [
     STOCKWOVEN, CP_AMM, DAMM_POOL_AUTHORITY, DAMM_EVENT_AUTHORITY, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID, SystemProgram.programId, ComputeBudgetProgram.programId,
-    pk(d.vault), pk(d.shareMint),
+    pk(d.vault), basketAddress(pk(d.vault)), pk(d.shareMint),
     ...d.assets.flatMap((a) => [pk(a.mint), pk(a.reserve), ata(pk(d.treasury), pk(a.mint))]),
     ...d.pools.flatMap((p) => [p.pool, p.position!, p.positionNftAccount!, p.tokenAVault, p.tokenBVault].map(pk)),
     ...d.marketPools.flatMap((p) => [p.pool, p.tokenAVault, p.tokenBVault].map(pk)),
@@ -298,6 +320,7 @@ async function main() {
   }
   await addVaultPools(d);
   await addMarketPools(d);
+  await ensureBasket(d);
   await ensureLookupTable(d);
   log("done. wrote", DEVNET_FILES.map(String).join(" and "));
 }

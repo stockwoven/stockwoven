@@ -1,5 +1,6 @@
 export { Stockwoven } from "./client.js";
 export type {
+  BasketInfo,
   BuildOptions,
   BuiltTransactions,
   DepositInput,
@@ -33,7 +34,41 @@ export {
   zapOut,
 } from "./quote.js";
 export type { Hop, Route, Swap, ZapInPlan, ZapOutPlan } from "./quote.js";
-export { createTokenAccountIx, depositIx, harvestIx, redeemIx, swapIx, tokenAccount, unwrapSolIx, wrapSolIxs } from "./instructions.js";
+export {
+  createTokenAccountIx,
+  depositIx,
+  depositSingleIx,
+  harvestIx,
+  redeemIx,
+  redeemSingleIx,
+  swapIx,
+  tokenAccount,
+  unwrapSolIx,
+  wrapSolIxs,
+} from "./instructions.js";
+export {
+  NANO_SHARES,
+  afterFee,
+  amountForValue,
+  basketAddress,
+  book,
+  breaker,
+  conversionTargets,
+  decodeBasket,
+  describeRefusal,
+  dynamicFeeBps,
+  marginalFeeBps,
+  pegged,
+  planRedeemTo,
+  planSingleDeposit,
+  planSingleRedeem,
+  proRata,
+  valueBook,
+  valueOf,
+  weightBps,
+  withinBand,
+} from "./basket.js";
+export type { Basket, BasketAsset, BasketParams, Book, Refusal, RedeemToPlan, SingleDepositPlan, SingleRedeemPlan } from "./basket.js";
 export { fetchActivity } from "./activity.js";
 export type { Activity, ActivityKind } from "./activity.js";
 export { StockwovenError, VAULT_ERRORS, parseError } from "./errors.js";

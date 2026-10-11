@@ -1,6 +1,6 @@
 # Deposit.
 
-Hand over the vault's current mix, or pay with one token and let the app swap it into the mix. Receive swSPCX.
+Hand over the vault's current mix, or pay with one token alone. Receive swSPCX.
 
 ## How a deposit is priced
 
@@ -20,23 +20,31 @@ If you hold every token in the vault's mix, you can deposit them directly. The a
 
 ## Deposit with one token
 
-You can also pay with a single token: USDC, SOL, or any one issuer's SpaceX token (SPCXx, SPCX or SPCXon).
+You can also pay with a single token: USDC, SOL, or any one issuer's SpaceX token (SPCXx, SPCX or SPCXon). It takes one transaction.
 
-The app splits your token into the vault's mix by swapping parts of it through the vault's pools and market pools, then makes a normal deposit, all in one transaction. If any step fails, nothing happens.
+- **An issuer's SpaceX token counts 1:1.** One SPCXx, one SPCX or one SPCXon is one share of SpaceX. It goes into the vault's reserve as it is, and you receive swSPCX for its value after the vault fee.
+- **USDC is converted.** The vault swaps it, inside the same transaction, into the issuer token it holds least of against its target, and counts what came out. SOL is converted the same way, through USDC if no pool pairs it with that token.
+- **A token at its cap is redirected.** No issuer may be more than 40% of the vault. If your token is at its cap, the vault converts it into an underweight issuer token instead, and the app tells you before you sign.
 
-It costs:
+### The vault fee
 
-- the pool fee on every swapped part (0.30% in the vault's pools),
-- price impact on those swaps, which grows with the size of the deposit against the pools,
-- no vault fee.
+Each token has a target share of the vault. The fee depends on where your deposit leaves your token against that target:
 
-The swaps the app routes through the vault's own pools pay their fee to the vault, so part of what you pay goes to swSPCX holders, you included. Whatever the deposit doesn't take stays in your wallet.
+- at the target: 0.05%;
+- above it: 0.05% plus 0.02% for every percentage point over, up to 1%;
+- below it: less, down to a 0.03% discount.
+
+So depositing the token the vault needs is cheapest, and the market keeps the vault balanced. The fee stays in the vault, for swSPCX holders, you included. A converted deposit also pays the pool fee and price impact of its swap; when the swap goes through one of the vault's own pools, that fee goes to the vault too.
+
+### When a token is not accepted alone
+
+Pricing every issuer token at 1:1 only holds while they trade within 2% of each other. If one drifts further, the vault stops taking it alone, stops converting into it, and stops paying it out alone, until it comes back. The vault also stops single-token deposits while the keeper's prices are more than 10 minutes old, or while one of its pools trades more than 2% away from them. In those cases the app falls back to swapping your token into the mix and depositing the mix, in two transactions, and says why. A deposit with the mix never depends on prices.
 
 For SOL, the app wraps it first and closes the temporary wrapped-SOL account in the same transaction, so its rent comes back. It keeps a little SOL in your wallet for the network fee and the token accounts a first deposit opens.
 
 ## Slippage limit
 
-Before you sign, the app shows a slippage limit. A deposit with the mix fails if it would take more of any token than you sent. A deposit with one token also fails if any swap fills worse than its limit. Either way, nothing moves and nothing is minted.
+Before you sign, the app shows a slippage limit. A deposit with the mix fails if it would take more of any token than you sent. A deposit with one token fails if it would mint fewer swSPCX than the limit. Either way, nothing moves and nothing is minted.
 
 ## When deposits are paused
 

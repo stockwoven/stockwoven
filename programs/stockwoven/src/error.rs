@@ -52,4 +52,20 @@ pub enum ErrorCode {
     InvalidRoute,
     #[msg("Arbitrage did not reach the minimum profit")]
     NotProfitable,
+    #[msg("Basket settings are invalid or do not cover every vault asset")]
+    InvalidBasket,
+    #[msg("The keeper's prices are too old")]
+    PricesStale,
+    #[msg("A vault pool's price is outside the band around the keeper's prices")]
+    PoolOutOfBand,
+    #[msg("This token's price is outside the 1:1 band; the vault stopped accepting it")]
+    TokenDepegged,
+    #[msg("This deposit would put the token above its cap")]
+    AssetAtCap,
+    #[msg("Only issuer tokens of the stock are taken in or paid out alone; convert the rest")]
+    NotAStock,
+    #[msg("Converted deposits must go into a token below its target weight")]
+    NotUnderweight,
+    #[msg("The vault does not hold enough of this token")]
+    InsufficientLiquidity,
 }

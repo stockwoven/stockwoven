@@ -70,3 +70,59 @@ impl Vault {
         self.assets().iter().position(|a| a.mint == *mint)
     }
 }
+
+/// Fee and circuit-breaker settings of a vault's basket.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct BasketParams {
+    /// The ±band, in bps, inside which issuer tokens are priced 1:1. A token whose market price
+    /// leaves it is refused, and a vault pool whose price drifts this far from the keeper's prices
+    /// halts every single-token deposit and redemption.
+    pub band_bps: u16,
+    /// Fee for a deposit or redemption that leaves the token exactly at its target weight.
+    pub base_fee_bps: u16,
+    /// Fee added per 100 bps (one percentage point) the token ends up away from its target, in
+    /// the direction that hurts the vault: overweight on deposits, underweight on redemptions.
+    /// Moving towards the target lowers the fee by the same slope.
+    pub fee_slope_bps: u16,
+    pub max_fee_bps: u16,
+    /// The largest discount (negative fee) a deposit or redemption that rebalances the vault earns.
+    pub max_discount_bps: u16,
+    /// Single-token deposits and redemptions stop when the keeper's prices are older than this.
+    pub max_price_age: u32,
+}
+
+/// Per-asset weights, in the vault's asset order.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct AssetWeights {
+    /// An issuer's token of the stock, valued 1:1 with one share of it. Otherwise USDC or SOL,
+    /// valued at the keeper's price and only accepted by converting it into an issuer token.
+    pub is_stock: bool,
+    /// Target share of the vault's value, in bps.
+    pub target_weight_bps: u16,
+    /// Cap on the share of the vault's value, in bps. Deposits that would cross it are refused.
+    pub max_weight_bps: u16,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct BasketAsset {
+    pub weights: AssetWeights,
+    /// The keeper's market price, in nano-shares of the stock per whole token (1e9 = one share).
+    /// For issuer tokens it only feeds the circuit breaker: the vault always values them 1:1.
+    pub price: u64,
+}
+
+/// Single-token deposits and redemptions, Sanctum Infinity style: the vault takes or pays one
+/// token, values issuer tokens 1:1, and charges a fee that depends on how the trade moves that
+/// token's weight against its target. Lives next to the vault at `["basket", vault]`.
+#[account]
+#[derive(InitSpace)]
+pub struct Basket {
+    pub vault: Pubkey,
+    pub bump: u8,
+    pub params: BasketParams,
+    /// Assets configured; must match the vault's.
+    pub num_assets: u8,
+    pub assets: [BasketAsset; MAX_ASSETS],
+    /// Unix time of the keeper's last `set_prices`.
+    pub prices_updated_at: i64,
+}

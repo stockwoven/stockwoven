@@ -14,8 +14,33 @@ import {
 } from "@solana/web3.js";
 import { Activity, fetchActivity } from "./activity.js";
 import { DEVNET_SPCX, Pool, PoolKind, TokenInfo, VaultConfig, assetIndex } from "./config.js";
-import { createTokenAccountIx, depositIx, harvestIx, redeemIx, swapIx, tokenAccount, unwrapSolIx, wrapSolIxs } from "./instructions.js";
-import { Swap, ZapInPlan, ZapOutPlan, applyBps, exposure, poolValue, tokensForShares, usdValue, vaultValue, zapIn, zapOut } from "./quote.js";
+import {
+  BasketParams,
+  Refusal,
+  SingleDepositPlan,
+  basketAddress,
+  breaker,
+  describeRefusal,
+  marginalFeeBps,
+  pegged,
+  planRedeemTo,
+  planSingleDeposit,
+  planSingleRedeem,
+  valueBook,
+} from "./basket.js";
+import {
+  createTokenAccountIx,
+  depositIx,
+  depositSingleIx,
+  harvestIx,
+  redeemIx,
+  redeemSingleIx,
+  swapIx,
+  tokenAccount,
+  unwrapSolIx,
+  wrapSolIxs,
+} from "./instructions.js";
+import { Swap, ZapInPlan, ZapOutPlan, applyBps, exposure, poolValue, prices, tokensForShares, usdValue, vaultValue, zapIn, zapOut } from "./quote.js";
 import { VaultState, fetchVaultState } from "./state.js";
 
 export type StockwovenOptions = {
@@ -38,16 +63,31 @@ export type StockwovenOptions = {
 /**
  * What the customer pays with. `"mix"` pays every asset in the vault's current proportions for an
  * exact number of `shares`; any asset (by symbol: "SPCXx", "SPCX", "SPCXon", "USDC", "SOL") pays
- * with that one token, which the transaction swaps into the mix.
+ * with that one token: the vault takes it alone (`deposit_single`), or, when it cannot, the
+ * transaction swaps it into the mix.
  */
 export type DepositInput = { pay: "mix"; shares: bigint } | { pay: string; amount: bigint };
 
 export type DepositQuote = {
   input: DepositInput;
-  /** "mix": one transaction. "swap": two, the swaps then the deposit (one transaction would pass the runtime's instruction limit). */
-  route: "mix" | "swap";
-  /** Share tokens minted, raw units. The deposit mints exactly this or fails. */
+  /**
+   * "mix": one transaction. "single": one transaction; the vault takes the token alone, valued 1:1
+   * for an issuer token, or converts it into an underweight issuer token. "swap" (the fallback when
+   * the vault cannot take it alone): two, the swaps into the mix, then the deposit.
+   */
+  route: "mix" | "single" | "swap";
+  /** Share tokens minted, raw units. "mix" and "swap" mint exactly this; "single" mints about this, and at least `minShares`. */
   shares: bigint;
+  /** The least the deposit mints, or it fails. Equals `shares` except on the "single" route. */
+  minShares: bigint;
+  /** "single" only: the vault's dynamic fee in signed bps (negative is a discount); it stays in the vault. */
+  feeBps?: number;
+  /** "single" only: the issuer token the deposit becomes in the vault. */
+  into?: TokenInfo;
+  /** "single" only, when the token does not go in as itself: it is USDC or SOL, at its cap, or outside its 1:1 band. */
+  redirect?: "quote" | "cap" | "depeg";
+  /** "swap" only: why the vault could not take the token alone (no basket, prices stale, a pool off its band…). */
+  fallbackReason?: string;
   /** The most the customer can be charged per token; anything the deposit doesn't take stays in their wallet. */
   maxSpend: { token: TokenInfo; amount: bigint }[];
   /** `shares` in USD at the vault's value per share. */
@@ -56,7 +96,7 @@ export type DepositQuote = {
   costUsd: number;
   /** Slot of the state the quote was computed from. */
   slot: number;
-  plan: { route: "mix"; maxAmounts: bigint[] } | { route: "swap"; zap: ZapInPlan };
+  plan: { route: "mix"; maxAmounts: bigint[] } | { route: "single"; single: SingleDepositPlan<Pool> } | { route: "swap"; zap: ZapInPlan };
 };
 
 export type RedeemQuote = {
@@ -67,7 +107,16 @@ export type RedeemQuote = {
   payout: { token: TokenInfo; min: bigint }[];
   valueUsd: number;
   slot: number;
-  plan: { route: "kind"; minAmounts: bigint[] } | { route: "swap"; output: number; zap: ZapOutPlan };
+  /** One-token routes on the basket: the vault's dynamic fee in signed bps (negative is a discount). */
+  feeBps?: number;
+  /** For USDC or SOL on the basket: the issuer token the vault pays, which the same transaction sells. */
+  via?: TokenInfo;
+  /** On the in-kind-then-swap fallback: why the vault could not pay one token. */
+  fallbackReason?: string;
+  plan:
+    | { route: "kind"; minAmounts: bigint[] }
+    | { route: "single"; asset: number; minAmount: bigint; output: number; swaps: Swap[] }
+    | { route: "swap"; output: number; zap: ZapOutPlan };
 };
 
 export type BuildOptions = {
@@ -90,6 +139,33 @@ export type BuiltTransactions = {
 
 export type PoolInfo = { label: string; kind: PoolKind; feeBps: number; valueUsd: number; targetWeightBps: number; pool: PublicKey };
 
+/** Single-token deposits and redemptions: weights, caps, fees and the circuit breaker. */
+export type BasketInfo = {
+  address: PublicKey;
+  /** "open" when single-token trades work now; otherwise the breaker that stops them. */
+  status: "open" | "no-basket" | "invalid" | "stale" | "pool-out-of-band";
+  /** A sentence for the status, null when open. */
+  reason: string | null;
+  /** Age of the keeper's prices, seconds. */
+  pricesAgeSec: number;
+  params: BasketParams;
+  assets: {
+    token: TokenInfo;
+    /** Issuer token of the stock (taken and paid out alone, 1:1). */
+    isStock: boolean;
+    weightBps: number;
+    targetWeightBps: number;
+    maxWeightBps: number;
+    /** Issuer tokens: whether the market price sits inside the 1:1 band. */
+    pegged: boolean;
+    /** The keeper's market price against one share, in bps (0 = exactly 1:1). */
+    priceVsShareBps: number;
+    /** Fee on a small deposit or redemption of this token alone, signed bps; null when it can't go in or out alone. */
+    depositFeeBps: number | null;
+    redeemFeeBps: number | null;
+  }[];
+};
+
 export type VaultInfo = {
   stock: string;
   share: VaultConfig["share"];
@@ -110,6 +186,8 @@ export type VaultInfo = {
   /** USD per whole token, by symbol, read from the pools. */
   prices: Record<string, number>;
   depositsPaused: boolean;
+  /** Single-token deposits and redemptions; null when the vault has no basket yet. */
+  basket: BasketInfo | null;
   slot: number;
 };
 
@@ -121,6 +199,8 @@ export type Position = {
   /** What redeeming all of them in kind would pay now, raw units. */
   redeemable: { token: TokenInfo; amount: bigint }[];
 };
+
+const nowSec = () => Math.floor(Date.now() / 1000);
 
 export class Stockwoven {
   readonly connection: Connection;
@@ -187,8 +267,58 @@ export class Stockwoven {
       idleUsd: usdValue(cfg, st.reserves, px),
       prices: Object.fromEntries(cfg.assets.map((a, k) => [a.symbol, px[k]])),
       depositsPaused: st.depositsPaused,
+      basket: this.basketInfo(st),
       slot: st.slot,
     };
+  }
+
+  private basketInfo(st: VaultState): BasketInfo | null {
+    const cfg = this.vault;
+    const basket = st.basket;
+    if (!basket) return null;
+    const v = this.basketVault();
+    const stop = breaker(v, basket, st, nowSec());
+    const book = basket.numAssets === cfg.assets.length ? valueBook(v, basket, st) : null;
+    const status: BasketInfo["status"] = !stop
+      ? "open"
+      : stop.kind === "PricesStale"
+        ? "stale"
+        : stop.kind === "PoolOutOfBand"
+          ? "pool-out-of-band"
+          : stop.kind === "NoBasket"
+            ? "no-basket"
+            : "invalid";
+    return {
+      address: basketAddress(cfg.program, cfg.vault),
+      status,
+      reason: stop ? this.describe(stop) : null,
+      pricesAgeSec: nowSec() - basket.pricesUpdatedAt,
+      params: basket.params,
+      assets: cfg.assets.map((token, k) => {
+        const a = basket.assets[k];
+        const ok = !stop && !!book && !!a && pegged(basket, k);
+        return {
+          token,
+          isStock: !!a?.isStock,
+          weightBps: book?.weights[k] ?? 0,
+          targetWeightBps: a?.targetWeightBps ?? 0,
+          maxWeightBps: a?.maxWeightBps ?? 0,
+          pegged: !!a && pegged(basket, k),
+          priceVsShareBps: a ? Math.round((Number(a.price) / 1e9 - 1) * 10_000) : 0,
+          depositFeeBps: ok && book.weights[k] < a.maxWeightBps ? marginalFeeBps(basket, book, k, true) : null,
+          redeemFeeBps: ok ? marginalFeeBps(basket, book, k, false) : null,
+        };
+      }),
+    };
+  }
+
+  /** The vault's shape for the basket math. */
+  private basketVault() {
+    return { decimals: this.vault.assets.map((a) => a.decimals), pools: this.vault.pools, marketPools: this.vault.marketPools };
+  }
+
+  private describe(r: Refusal) {
+    return describeRefusal(r, (k) => this.vault.assets[k].symbol, (i) => this.vault.pools[i].label);
   }
 
   async getPosition(owner: PublicKey, state?: VaultState): Promise<Position> {
@@ -225,6 +355,7 @@ export class Stockwoven {
         input,
         route: "mix",
         shares,
+        minShares: shares,
         maxSpend: cfg.assets.map((token, k) => ({ token, amount: maxAmounts[k] })),
         valueUsd: valueOf(shares),
         costUsd: usdValue(cfg, tokensForShares(cfg, st, shares, true), px),
@@ -236,6 +367,30 @@ export class Stockwoven {
     const { amount } = input as { amount: bigint };
     if (amount <= 0n) throw new Error("amount must be positive");
     const k = this.asset(input.pay);
+
+    // Alone, on the basket: one transaction.
+    const single = planSingleDeposit(this.basketVault(), st.basket, st, k, amount, nowSec(), this.routeSlippageBps);
+    if ("plan" in single) {
+      const p = single.plan;
+      const usdIn = (Number(amount) / 10 ** cfg.assets[k].decimals) * px[k];
+      this.checkLoss(usdIn, valueOf(p.shares));
+      return {
+        input,
+        route: "single",
+        shares: p.shares,
+        minShares: p.minShares,
+        feeBps: p.feeBps,
+        into: cfg.assets[p.into],
+        redirect: p.redirect ?? undefined,
+        maxSpend: [{ token: cfg.assets[k], amount }],
+        valueUsd: valueOf(p.shares),
+        costUsd: usdIn,
+        slot: st.slot,
+        plan: { route: "single", single: p },
+      };
+    }
+
+    // Otherwise swapped into the mix: two transactions.
     const zap = zapIn(cfg, st, k, amount, this.routeSlippageBps);
     if (!zap) throw new Error("amount too small to deposit");
     this.checkLoss(zap.usdIn, zap.usdOut);
@@ -244,6 +399,8 @@ export class Stockwoven {
       input,
       route: "swap",
       shares: zap.shares,
+      minShares: zap.shares,
+      fallbackReason: this.describe(single.refused),
       maxSpend: cfg.assets.map((token, i) => ({ token, amount: spend[i] })).filter((x) => x.amount > 0n),
       valueUsd: valueOf(zap.shares),
       costUsd: zap.usdIn,
@@ -253,8 +410,11 @@ export class Stockwoven {
   }
 
   /**
-   * Prices redeeming `shares`. In kind (the default), the vault pays a slice of every asset; with
-   * `receive` set to an asset ("USDC"...), the same transaction swaps the rest into it.
+   * Prices redeeming `shares`. In kind (the default), the vault pays a slice of every asset. With
+   * `receive` set to an issuer token, the vault pays that token alone (`redeem_single`, with the
+   * dynamic fee); set to USDC or SOL, it pays the issuer token that sells for the most and the same
+   * transaction sells it. When the vault can't pay one token (no basket, the breaker), it falls
+   * back to redeeming in kind and swapping the rest into `receive`.
    */
   async quoteRedeem(shares: bigint, options: { receive?: "kind" | string } = {}, state?: VaultState): Promise<RedeemQuote> {
     if (shares <= 0n) throw new Error("shares must be positive");
@@ -274,15 +434,55 @@ export class Stockwoven {
       };
     }
     const output = this.asset(receive);
+    const v = this.basketVault();
+    const px = prices(cfg, st);
+    const token = cfg.assets[output];
+    const usdOf = (raw: bigint, k: number) => (Number(raw) / 10 ** cfg.assets[k].decimals) * px[k];
+    let refused: Refusal;
+    if (st.basket?.assets[output]?.isStock) {
+      const r = planSingleRedeem(v, st.basket, st, shares, output, nowSec());
+      if ("plan" in r) {
+        const minAmount = applyBps(r.plan.amount, this.slippageBps);
+        return {
+          shares,
+          receive: token,
+          payout: [{ token, min: minAmount }],
+          valueUsd,
+          slot: st.slot,
+          feeBps: r.plan.feeBps,
+          plan: { route: "single", asset: output, minAmount, output, swaps: [] },
+        };
+      }
+      refused = r.refused;
+    } else {
+      const r = planRedeemTo(v, st.basket, st, shares, output, nowSec(), this.routeSlippageBps);
+      if ("plan" in r) {
+        const p = r.plan;
+        this.checkLoss(valueUsd, usdOf(p.out, output));
+        return {
+          shares,
+          receive: token,
+          payout: [{ token, min: p.out }],
+          valueUsd,
+          slot: st.slot,
+          feeBps: p.redeem.feeBps,
+          via: cfg.assets[p.redeem.asset],
+          plan: { route: "single", asset: p.redeem.asset, minAmount: p.minAmount, output, swaps: p.swaps },
+        };
+      }
+      refused = r.refused;
+    }
+
     const zap = zapOut(cfg, st, shares, output, this.routeSlippageBps);
     if (!zap) throw new Error("shares too small to redeem");
     this.checkLoss(valueUsd, zap.usdOut);
     return {
       shares,
-      receive: cfg.assets[output],
-      payout: [{ token: cfg.assets[output], min: zap.out }],
+      receive: token,
+      payout: [{ token, min: zap.out }],
       valueUsd,
       slot: st.slot,
+      fallbackReason: this.describe(refused),
       plan: { route: "swap", output, zap },
     };
   }
@@ -302,6 +502,15 @@ export class Stockwoven {
       const wrap = sol >= 0 && max[sol] > 0n ? wrapSolIxs(owner, max[sol]) : [];
       return [[...accounts, ...wrap, depositIx(cfg, owner, quote.shares, max), ...unwrap]];
     }
+    if (quote.plan.route === "single") {
+      const p = quote.plan.single;
+      // Only the accounts this deposit touches: the token paid, the token deposited, the share token.
+      const needed = this.accountIxs(owner, feePayer, exists, [p.input, p.mint]);
+      const wrap = sol >= 0 && p.input === sol ? wrapSolIxs(owner, p.amountIn) : [];
+      const pre = p.preSwap ? [swapIx(cfg, p.preSwap.pool, owner, p.preSwap.aToB, p.preSwap.amountIn, p.preSwap.minOut)] : [];
+      const deposit = depositSingleIx(cfg, owner, p.mint, p.depositAmount, p.minShares, p.convert?.pool);
+      return [[...needed, ...wrap, ...pre, deposit, ...(wrap.length > 0 || p.mint === sol ? unwrap : [])]];
+    }
     const zap = quote.plan.zap;
     const solIn = sol < 0 ? 0n : (zap.input === sol ? zap.amountIn : 0n) + zap.fromWallet[sol];
     return [
@@ -316,6 +525,12 @@ export class Stockwoven {
     const accounts = this.accountIxs(owner, feePayer, exists);
     const unwrap = assetIndex(cfg, "sol") >= 0 ? [unwrapSolIx(owner)] : [];
     if (quote.plan.route === "kind") return [[...accounts, redeemIx(cfg, owner, quote.shares, quote.plan.minAmounts), ...unwrap]];
+    if (quote.plan.route === "single") {
+      const p = quote.plan;
+      const needed = this.accountIxs(owner, feePayer, exists, [p.asset, p.output, ...p.swaps.flatMap((s) => [s.pool.a, s.pool.b])]);
+      const sol = assetIndex(cfg, "sol");
+      return [[...needed, redeemSingleIx(cfg, owner, p.asset, quote.shares, p.minAmount), ...this.swapIxs(p.swaps, owner), ...(p.output === sol ? unwrap : [])]];
+    }
     const zap = quote.plan.zap;
     return [[...accounts, redeemIx(cfg, owner, quote.shares, zap.minAmounts), ...this.swapIxs(zap.swaps, owner), ...unwrap]];
   }
@@ -367,9 +582,11 @@ export class Stockwoven {
     return swaps.map((s) => swapIx(this.vault, s.pool as Pool, owner, s.aToB, s.amountIn, s.minOut));
   }
 
-  private accountIxs(owner: PublicKey, feePayer: PublicKey, exists: boolean[]) {
+  /** Opens the owner's missing token accounts: every asset and the share token, or only `assets` and the share token. */
+  private accountIxs(owner: PublicKey, feePayer: PublicKey, exists: boolean[], assets?: number[]) {
+    const share = this.vault.assets.length;
     return [...this.vault.assets, this.vault.share]
-      .filter((_, i) => !exists[i])
+      .filter((_, i) => !exists[i] && (!assets || i === share || assets.includes(i)))
       .map((t) => createTokenAccountIx(feePayer, owner, t));
   }
 

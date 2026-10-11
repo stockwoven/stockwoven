@@ -15,7 +15,7 @@ Two audiences, both served by the same vault:
 
 ## Product Purpose
 
-Several issuers tokenize the same stock, and each version trades in its own pools. The Stockwoven vault on Solana holds every issuer's version, provides liquidity with it in Meteora DAMM v2 pools it owns, and gives back one yield-bearing token per stock (`sw` prefix: swSPCX, swAAPL…). Three steps: **Deposit** (hand over the vault's current mix, or pay with one token and the app swaps it into the mix in the same transaction; receive the sw token), **Hold** (each token is a pro-rata slice of everything the vault holds, verifiable on-chain), **Redeem** (burn the sw token, take your slice of every token back in kind, or receive it all as USDC).
+Several issuers tokenize the same stock, and each version trades in its own pools. The Stockwoven vault on Solana holds every issuer's version, provides liquidity with it in Meteora DAMM v2 pools it owns, and gives back one yield-bearing token per stock (`sw` prefix: swSPCX, swAAPL…). Three steps: **Deposit** (hand over the vault's current mix, or pay with one token: issuer tokens count 1:1, USDC and SOL are converted into the most underweight issuer token; receive the sw token), **Hold** (each token is a pro-rata slice of everything the vault holds, verifiable on-chain), **Redeem** (burn the sw token, take your slice of every token back in kind, or receive it all as USDC).
 
 ## Positioning
 
@@ -29,13 +29,13 @@ One stock, one token. For SpaceX, the vault holds liquidity in four Meteora DAMM
 
 ## Capabilities and Constraints
 
-- Deposit swSPCX with the vault's mix or with any one token (SPCXx, SPCX, SPCXon, USDC or SOL), swapped into the mix in the same transaction.
-- Redeem in kind (a slice of every token) or to USDC in the same transaction.
+- Deposit swSPCX with the vault's mix, or with any one token in one transaction (`deposit_single`): issuer tokens count 1:1, USDC and SOL are converted on-chain into an underweight issuer token. Per-issuer target weights and a 40% cap; a dynamic fee by weight (0.05% at target, +0.02% per point overweight, up to 1%, down to a 0.03% discount); a circuit breaker that stops taking or paying out a token more than 2% off 1:1, or anything while the keeper's prices are stale. Falls back to the two-transaction zap when the breaker is on.
+- Redeem in kind (the default, never priced, never paused) or into one issuer token with the dynamic fee (`redeem_single`), sold for USDC in the same transaction when asked.
 - Swaps between any of the tokens across the vault's pools and market pools.
 - Permissionless `harvest` of the protocol's cut of pool fees to the treasury.
 - Keeper bot: auto-balances liquidity toward the pools with the highest fee yield (`rebalance_remove`, `vault_swap`, `rebalance_add`, on-chain target weights) and runs 2–4 hop arbitrage cycles that must end with more of the starting token. It can't mint shares or move funds out of the vault.
 - Test-token faucet; wallet activity history read from chain.
-- Fee split per 0.30% pool fee: 64% compounds for holders, 16% treasury (via `harvest`), 20% Meteora. Arbitrage profit: 80% stays with holders, 20% treasury. Protocol revenue is those two treasury shares; there is no deposit or redemption fee.
+- Fee split per 0.30% pool fee: 64% compounds for holders, 16% treasury (via `harvest`), 20% Meteora. Arbitrage profit: 80% stays with holders, 20% treasury. Protocol revenue is those two treasury shares. The single-token vault fee stays with holders.
 - Redemptions are never paused by the vault; deposits can be paused by the admin.
 
 ## Brand Commitments

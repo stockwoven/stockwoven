@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import * as app from "../../app/src/lib/stockwoven.js";
-import { DEVNET_SPCX, VaultState, prices, sharesFor, tokensForShares, zapIn, zapOut } from "../src/index.js";
+import { DEVNET_SPCX, VaultState, planSingleDeposit, planSingleRedeem, prices, sharesFor, tokensForShares, zapIn, zapOut } from "../src/index.js";
 
 const devnet = JSON.parse(readFileSync(new URL("../../app/src/lib/devnet.json", import.meta.url), "utf8"));
 const cfg = DEVNET_SPCX;
@@ -100,4 +100,41 @@ test("one-token deposits and redemptions to USDC match the app", () => {
     assert.equal(out?.out ?? null, theirs?.out ?? null);
     assert.deepEqual(out?.minAmounts ?? null, theirs?.amounts ?? null);
   }
+});
+
+test("the basket math is one file, shared byte for byte with the app", () => {
+  const sdk = readFileSync(new URL("../src/basket.ts", import.meta.url), "utf8");
+  const ours = readFileSync(new URL("../../app/src/lib/basket.ts", import.meta.url), "utf8");
+  assert.equal(ours, sdk, "copy sdk/src/basket.ts to app/src/lib/basket.ts");
+});
+
+test("single-token deposits and redemptions match the app", () => {
+  const now = 1_760_000_000;
+  const share = (usd: number) => BigInt(Math.round((usd / 168) * 1e9));
+  const v = { decimals: cfg.assets.map((a) => a.decimals), pools: cfg.pools, marketPools: cfg.marketPools };
+  let planned = 0;
+  for (const s of states(10)) {
+    const px = prices(cfg, s);
+    const basket = {
+      // A band wide enough that the random states, whose pools disagree, pass the breaker.
+      params: { bandBps: 9_999, baseFeeBps: 5, feeSlopeBps: 2, maxFeeBps: 100, maxDiscountBps: 3, maxPriceAge: 600 },
+      numAssets: 5,
+      assets: cfg.assets.map((a, k) => ({ isStock: a.kind === "stock", targetWeightBps: a.kind === "stock" ? 2_500 : 1_250, maxWeightBps: a.kind === "stock" ? 4_000 : 10_000, price: share(px[k] || 1) })),
+      pricesUpdatedAt: now - 10,
+    };
+    const withBasket = { ...s, basket };
+    for (const [k, amount] of [[3, 100_000_000n], [0, 50_000_000n], [2, 500_000_000n], [4, 20_000_000n]] as const) {
+      const ours = app.quoteSingleDeposit(withBasket, k, amount, now);
+      const sdk = planSingleDeposit(v, basket, withBasket, k, amount, now, Number(app.ROUTE_SLIPPAGE_BPS));
+      const key = (r: typeof sdk | typeof ours) => ("plan" in r ? [r.plan.into, r.plan.shares, r.plan.minShares, r.plan.feeBps, r.plan.convert?.pool.pool.toBase58() ?? null] : r.refused.kind);
+      assert.deepEqual(key(ours), key(sdk), `asset ${k}`);
+      if ("plan" in sdk) planned++;
+    }
+    for (const k of [0, 1, 2]) {
+      const ours = app.quoteSingleRedeem(withBasket, 10n ** 8n, k, now);
+      const sdk = planSingleRedeem(v, basket, withBasket, 10n ** 8n, k, now);
+      assert.deepEqual("plan" in ours ? ours.plan.amount : ours.refused.kind, "plan" in sdk ? sdk.plan.amount : sdk.refused.kind);
+    }
+  }
+  assert.ok(planned >= 10, `only ${planned} of 40 deposits planned`);
 });

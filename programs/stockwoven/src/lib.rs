@@ -98,4 +98,30 @@ pub mod stockwoven {
     pub fn set_pool_weights(ctx: Context<AdminOnly>, weights: Vec<u16>) -> Result<()> {
         crate::instructions::admin::handle_set_pool_weights(ctx, weights)
     }
+
+    /// Creates the basket: target weights, caps, the dynamic fee and the circuit breaker for
+    /// single-token deposits and redemptions.
+    pub fn init_basket(ctx: Context<InitBasket>, params: BasketParams, weights: Vec<AssetWeights>) -> Result<()> {
+        crate::instructions::basket::handle_init_basket(ctx, params, weights)
+    }
+
+    pub fn set_basket(ctx: Context<SetBasket>, params: BasketParams, weights: Vec<AssetWeights>) -> Result<()> {
+        crate::instructions::basket::handle_set_basket(ctx, params, weights)
+    }
+
+    /// Keeper: market prices in nano-shares of the stock per whole token, one per asset.
+    pub fn set_prices(ctx: Context<SetPrices>, prices: Vec<u64>) -> Result<()> {
+        crate::instructions::basket::handle_set_prices(ctx, prices)
+    }
+
+    /// Deposits one token, alone. Issuer tokens count 1:1; USDC and SOL are converted into an
+    /// underweight issuer token first. Pays the dynamic fee and respects caps and the breaker.
+    pub fn deposit_single<'info>(ctx: Context<'info, Single<'info>>, amount_in: u64, min_shares: u64) -> Result<()> {
+        crate::instructions::basket::handle_deposit_single(ctx, amount_in, min_shares)
+    }
+
+    /// Burns shares for one issuer token, paying the dynamic fee.
+    pub fn redeem_single<'info>(ctx: Context<'info, Single<'info>>, shares: u64, min_amount: u64) -> Result<()> {
+        crate::instructions::basket::handle_redeem_single(ctx, shares, min_amount)
+    }
 }

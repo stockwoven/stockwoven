@@ -16,6 +16,20 @@ import {
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
 import devnet from "./devnet.json";
+import {
+  Basket,
+  Refusal,
+  basketAddress,
+  breaker,
+  decodeBasket,
+  describeRefusal,
+  marginalFeeBps,
+  pegged,
+  planRedeemTo,
+  planSingleDeposit,
+  planSingleRedeem,
+  valueBook,
+} from "./basket";
 
 export const CP_AMM = new PublicKey("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
 const DAMM_POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC");
@@ -115,7 +129,12 @@ const DISC = {
   redeem: [184, 12, 86, 149, 70, 196, 97, 225],
   harvest: [228, 241, 31, 182, 53, 169, 59, 199],
   swap: [248, 198, 158, 145, 225, 117, 135, 200],
+  depositSingle: [116, 81, 213, 110, 17, 83, 209, 188],
+  redeemSingle: [99, 237, 186, 22, 18, 172, 251, 95],
 };
+
+/** The basket account: weights, caps, fees and the keeper's prices for single-token trades. */
+export const BASKET = basketAddress(VAULT.program, VAULT.vault);
 
 const u8 = (v: number) => Buffer.from([v]);
 const u32 = (v: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(v); return b; };
@@ -162,6 +181,40 @@ export function redeemIx(user: PublicKey, shares: bigint, minAmounts: bigint[]) 
     programId: VAULT.program,
     data: Buffer.concat([Buffer.from(DISC.redeem), u64(shares), vecU64(minAmounts)]),
     keys: holderKeys(user),
+  });
+}
+
+/**
+ * Fixed accounts of `deposit_single` / `redeem_single` for asset `k`, then (reserve, mint) per
+ * asset, the vault pools, and the optional conversion pool.
+ */
+function singleKeys(user: PublicKey, k: number, convert?: Pool) {
+  const keys = [
+    r(user, true), r(VAULT.vault), r(BASKET), w(VAULT.shareMint), w(ata(user, VAULT.shareMint)),
+    w(assetAccount(user, k)), r(ASSETS[k].mint), r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
+    r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+    ...ASSETS.flatMap((a) => [w(a.reserve), r(a.mint)]),
+    ...POOLS.flatMap((p) => [w(p.pool), w(p.position!), r(p.positionNftAccount!), w(p.tokenAVault), w(p.tokenBVault)]),
+  ];
+  if (convert) keys.push(w(convert.pool), w(convert.tokenAVault), w(convert.tokenBVault), r(ASSETS[convert.a].mint), r(ASSETS[convert.b].mint));
+  return keys;
+}
+
+/** Deposits `amountIn` of asset `k` alone; with `convert`, the vault first swaps it on that pool. */
+export function depositSingleIx(user: PublicKey, k: number, amountIn: bigint, minShares: bigint, convert?: Pool) {
+  return new TransactionInstruction({
+    programId: VAULT.program,
+    data: Buffer.concat([Buffer.from(DISC.depositSingle), u64(amountIn), u64(minShares)]),
+    keys: singleKeys(user, k, convert),
+  });
+}
+
+/** Burns `shares` for issuer token `k` alone, paying at least `minAmount`. */
+export function redeemSingleIx(user: PublicKey, k: number, shares: bigint, minAmount: bigint) {
+  return new TransactionInstruction({
+    programId: VAULT.program,
+    data: Buffer.concat([Buffer.from(DISC.redeemSingle), u64(shares), u64(minAmount)]),
+    keys: singleKeys(user, k),
   });
 }
 
@@ -228,6 +281,8 @@ export type VaultState = {
   /** Target weight per vault pool, in basis points. */
   weights: number[];
   depositsPaused: boolean;
+  /** Weights, caps, fees and the keeper's prices for single-token trades; null before the vault has a basket. */
+  basket?: Basket | null;
 };
 
 const u128 = (d: Buffer, offset: number) => d.readBigUInt64LE(offset) + (d.readBigUInt64LE(offset + 8) << 64n);
@@ -245,6 +300,7 @@ export async function fetchVaultState(conn: Connection): Promise<VaultState> {
     ...ASSETS.map((a) => a.reserve),
     ...POOLS.flatMap((p) => [p.pool, p.position!]),
     ...MARKET_POOLS.map((p) => p.pool),
+    BASKET,
   ];
   const infos = await conn.getMultipleAccountsInfo(keys);
   const data = infos.map((i) => (i ? Buffer.from(i.data) : null));
@@ -261,7 +317,9 @@ export async function fetchVaultState(conn: Connection): Promise<VaultState> {
     const d = data[k++];
     return d ? poolOf(d) : { liquidity: 0n, reserveA: 0n, reserveB: 0n };
   });
+  const basket = data[k++];
   return {
+    basket: basket ? decodeBasket(basket) : null,
     supply: data[1].readBigUInt64LE(36),
     reserves,
     pools,
@@ -554,6 +612,58 @@ export function quoteZapOut(s: VaultState, shares: bigint, output: number): ZapO
   return { amounts, swaps, out, usdOut: whole(out, output) * px[output] };
 }
 
+// ---- the basket: one token in or out --------------------------------------------------------
+
+/** The vault's shape for the basket math (lib/basket.ts, shared byte for byte with the SDK). */
+const BASKET_VAULT = { decimals: ASSETS.map((a) => a.decimals), pools: POOLS, marketPools: MARKET_POOLS };
+const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** A one-token deposit the vault takes alone (`deposit_single`), in one transaction, or why it can't. */
+export const quoteSingleDeposit = (s: VaultState, input: number, amountIn: bigint, now = nowSec()) =>
+  planSingleDeposit(BASKET_VAULT, s.basket, s, input, amountIn, now, Number(ROUTE_SLIPPAGE_BPS));
+
+/** `redeem_single` into issuer token `k`, or why the vault can't pay it alone. */
+export const quoteSingleRedeem = (s: VaultState, shares: bigint, k: number, now = nowSec()) => planSingleRedeem(BASKET_VAULT, s.basket, s, shares, k, now);
+
+/** `redeem_single` into the issuer token that sells for the most `target` (USDC), and the swaps that sell it. */
+export const quoteRedeemTo = (s: VaultState, shares: bigint, target: number, now = nowSec()) =>
+  planRedeemTo(BASKET_VAULT, s.basket, s, shares, target, now, Number(ROUTE_SLIPPAGE_BPS));
+
+/** A sentence for why the vault won't take or pay one token alone. */
+export const explainRefusal = (r: Refusal) => describeRefusal(r, (k) => ASSETS[k].symbol, (i) => POOLS[i].label);
+
+export type BasketView = {
+  /** Null when single-token trades work; otherwise what stops them. */
+  stopped: string | null;
+  bandBps: number;
+  assets: { weightBps: number; targetWeightBps: number; maxWeightBps: number; isStock: boolean; pegged: boolean; depositFeeBps: number | null; redeemFeeBps: number | null }[];
+};
+
+/** The basket at a glance: each asset's weight against its target and cap, its fee, and the breaker. */
+export function basketView(s: VaultState): BasketView | null {
+  const basket = s.basket;
+  if (!basket || basket.numAssets !== ASSETS.length) return null;
+  const stop = breaker(BASKET_VAULT, basket, s, nowSec());
+  const book = valueBook(BASKET_VAULT, basket, s);
+  return {
+    stopped: stop ? explainRefusal(stop) : null,
+    bandBps: basket.params.bandBps,
+    assets: ASSETS.map((_, k) => {
+      const a = basket.assets[k];
+      const open = !stop && !!book && pegged(basket, k);
+      return {
+        weightBps: book?.weights[k] ?? 0,
+        targetWeightBps: a.targetWeightBps,
+        maxWeightBps: a.maxWeightBps,
+        isStock: a.isStock,
+        pegged: pegged(basket, k),
+        depositFeeBps: open && book!.weights[k] < a.maxWeightBps ? marginalFeeBps(basket, book!, k, true) : null,
+        redeemFeeBps: open ? marginalFeeBps(basket, book!, k, false) : null,
+      };
+    }),
+  };
+}
+
 // ---- formatting -----------------------------------------------------------------------------
 
 export function toRaw(value: string, decimals: number): bigint {
@@ -569,6 +679,10 @@ export const usd = (v: number, digits = 2) =>
   `$${v.toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
 export const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)}%`;
+
+/** A signed fee in basis points, for people: "0.15% fee", "0.03% discount", "No fee". */
+export const feeText = (bps: number) =>
+  bps === 0 ? "No fee" : `${(Math.abs(bps) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 })}% ${bps > 0 ? "fee" : "discount"}`;
 
 export const explorer = (address: PublicKey | string, kind: "address" | "tx" = "address") =>
   `https://explorer.solana.com/${kind}/${address.toString()}?cluster=devnet`;

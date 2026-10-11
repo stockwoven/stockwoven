@@ -34,15 +34,18 @@ await sw.sendAll(built, [treasury, customer]);
 | `pay` | Transactions | What happens |
 |---|---|---|
 | `"mix"` with `shares` | 1 | Every asset in the vault's current proportions, for an exact number of shares. Unused amounts are refunded. |
-| `"USDC"`, `"SOL"`, `"SPCXx"`, `"SPCX"` or `"SPCXon"` with `amount` | 2 | The first transaction swaps the token into each asset the vault holds; the second deposits them and mints exactly the quoted shares. |
+| `"SPCXx"`, `"SPCX"` or `"SPCXon"` with `amount` | 1 | The vault takes the issuer token alone and counts it 1:1 as one SpaceX share, less a dynamic fee (`route: "single"`). If the token is at its cap or outside its 1:1 band, the vault converts it into an underweight issuer token in the same instruction. |
+| `"USDC"` or `"SOL"` with `amount` | 1 | The vault converts it into the issuer token furthest below its target weight, then counts that token 1:1. SOL is swapped to USDC first when no pool pairs it with that token. |
 
-A one-token deposit is two transactions because the swaps and the deposit together exceed Solana's limit of 64 instructions and inner calls per transaction. A wallet signs both in one prompt (`signAllTransactions`); send and confirm them in order.
+The vault keeps a target weight and a cap for each token (for example, at most 40% in one issuer). Its fee depends on how a deposit moves that token's weight: a token above its target costs more, one below costs less or earns a small discount. The fee stays in the vault, for holders. The quote returns `feeBps` (negative for a discount), the token the deposit became (`into`), and `minShares`, the least the transaction will mint.
 
-Redemptions pay a slice of every asset in kind, or with `{ receive: "USDC" }`, everything swapped into USDC in the same transaction. The vault never pauses redemptions.
+1:1 only holds inside a band of ±2%. If an issuer token's market price leaves the band, the vault stops taking it alone. If the keeper's prices are out of date, or a vault pool trades outside the band around them, every single-token deposit pauses. When that happens, the quote falls back to the older route (`route: "swap"`, two transactions that swap the token into the vault's mix and deposit it), and `fallbackReason` says why.
+
+Redemptions pay a slice of every asset in kind by default, and that never needs a price. With `{ receive: "SPCXon" }` (any issuer token), the vault pays that token alone, less the dynamic fee: taking out a token below its target costs more. With `{ receive: "USDC" }`, the vault pays whichever issuer token sells for the most USDC, and the same transaction sells it. The vault never pauses in-kind redemptions.
 
 ## Reading the vault
 
-`getVault()` returns the value of one swSPCX in USD, the vault's total value, its exposure (the share of value in SpaceX tokens, USDC and SOL), each pool's value and target weight, the idle reserves and the pause flag. `getPosition(owner)` returns a customer's swSPCX, its USD value and what redeeming it in kind would pay. `getActivity(owner)` lists their latest deposits, redemptions and swaps.
+`getVault()` returns the value of one swSPCX in USD, the vault's total value, its exposure (the share of value in SpaceX tokens, USDC and SOL), each pool's value and target weight, the idle reserves and the pause flag. Its `basket` field shows each token's weight, target and cap, whether it is inside its band, the fee on a small deposit or redemption, the age of the keeper's prices, and whether the breaker is on (`status`). `getPosition(owner)` returns a customer's swSPCX, its USD value and what redeeming it in kind would pay. `getActivity(owner)` lists their latest deposits, redemptions and swaps.
 
 ## Limits
 
@@ -52,6 +55,6 @@ Redemptions pay a slice of every asset in kind, or with `{ receive: "USDC" }`, e
 
 ## Errors
 
-`parseError(error)` turns a failed transaction into a `kind` you can branch on (`DepositsPaused`, `SlippageExceeded`, `InsufficientFunds`, `TooManyInstructions`, `BlockhashExpired`, `RateLimited`, `Rejected`) and a sentence for your own copy.
+`parseError(error)` turns a failed transaction into a `kind` you can branch on (`DepositsPaused`, `SlippageExceeded`, `AssetAtCap`, `TokenDepegged`, `PricesStale`, `PoolOutOfBand`, `InsufficientFunds`, `TooManyInstructions`, `BlockhashExpired`, `RateLimited`, `Rejected`) and a sentence for your own copy.
 
 The full reference, with every method and option, is in `sdk/README.md`; a custodial backend example is in `sdk/examples/custodial-backend.ts`.

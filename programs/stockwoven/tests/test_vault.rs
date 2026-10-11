@@ -21,7 +21,7 @@ use {
     solana_transaction::versioned::VersionedTransaction,
     stockwoven::{
         cp_amm::{self, types as amm},
-        AddPoolArgs, Vault, DAMM_EVENT_AUTHORITY, DAMM_POOL_AUTHORITY,
+        AddPoolArgs, AssetWeights, Basket, BasketParams, Vault, DAMM_EVENT_AUTHORITY, DAMM_POOL_AUTHORITY,
     },
 };
 
@@ -296,7 +296,7 @@ impl Env {
         LOOKUP_TABLE.with(|t| *t.borrow_mut() = None);
         env.trader = env.user([1_000.0, 1_000.0, 1_000.0, 200_000.0, 2_000.0]);
         env.setup_vault();
-        let mut addresses = vec![env.vault, env.share_mint, DAMM_POOL_AUTHORITY, DAMM_EVENT_AUTHORITY, cp_amm::ID, TOKEN_PROGRAM, TOKEN_2022_PROGRAM];
+        let mut addresses = vec![env.vault, env.basket(), env.share_mint, DAMM_POOL_AUTHORITY, DAMM_EVENT_AUTHORITY, cp_amm::ID, TOKEN_PROGRAM, TOKEN_2022_PROGRAM];
         for a in &env.assets {
             addresses.extend([a.mint, a.reserve, a.treasury]);
         }
@@ -1132,4 +1132,377 @@ fn cu_profile() {
         assert!(cu < 1_400_000, "{label}");
     }
     assert!(LAST_CU.with(|c| c.get()) > 0);
+}
+
+// Single-token deposits and redemptions: the basket.
+
+const NOW: i64 = 1_760_000_000;
+
+/// 2% band, 5 bps base fee plus 2 bps per point away from target, at most 1%, at best a 3 bps
+/// discount, prices good for ten minutes.
+fn basket_params() -> BasketParams {
+    BasketParams { band_bps: 200, base_fee_bps: 5, fee_slope_bps: 2, max_fee_bps: 100, max_discount_bps: 3, max_price_age: 600 }
+}
+
+/// (issuer token?, target, cap) per asset. The seed leaves SPCXx at its 40% cap, SPCX at 30%
+/// (above its 25% target), and SPCXon, USDC and SOL at 10% each (SPCXon well under its 25%).
+const WEIGHTS: [(bool, u16, u16); 5] = [(true, 3_000, 4_000), (true, 2_500, 4_000), (true, 2_500, 4_000), (false, 1_000, 10_000), (false, 1_000, 10_000)];
+
+fn weights() -> Vec<AssetWeights> {
+    WEIGHTS.iter().map(|&(is_stock, target, cap)| AssetWeights { is_stock, target_weight_bps: target, max_weight_bps: cap }).collect()
+}
+
+impl Env {
+    fn basket(&self) -> Pubkey {
+        pda(&[b"basket", self.vault.as_ref()], &stockwoven::id())
+    }
+
+    fn set_clock(&mut self, unix_timestamp: i64) {
+        let mut clock = self.svm.get_sysvar::<anchor_lang::prelude::Clock>();
+        clock.unix_timestamp = unix_timestamp;
+        self.svm.set_sysvar(&clock);
+    }
+
+    fn set_basket_ix(&self, admin: Pubkey, params: BasketParams, weights: Vec<AssetWeights>) -> Instruction {
+        Instruction::new_with_bytes(
+            stockwoven::id(),
+            &stockwoven::instruction::SetBasket { params, weights }.data(),
+            stockwoven::accounts::SetBasket { admin, vault: self.vault, basket: self.basket() }.to_account_metas(None),
+        )
+    }
+
+    /// The basket with `WEIGHTS`, and the assets' market prices posted at `NOW`.
+    fn setup_basket(&mut self) {
+        self.set_clock(NOW);
+        let ix = Instruction::new_with_bytes(
+            stockwoven::id(),
+            &stockwoven::instruction::InitBasket { params: basket_params(), weights: weights() }.data(),
+            stockwoven::accounts::InitBasket {
+                admin: self.admin.pubkey(),
+                vault: self.vault,
+                basket: self.basket(),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+        );
+        self.admin_send(&[ix], &[]).unwrap();
+        let prices = self.market_prices();
+        self.set_prices(prices).unwrap();
+    }
+
+    /// Nano-shares of SpaceX per whole token, at the assets' USD prices.
+    fn market_prices(&self) -> Vec<u64> {
+        self.assets.iter().map(|a| (a.price / self.assets[SPCXX].price * 1e9).round() as u64).collect()
+    }
+
+    fn set_prices_ix(&self, prices: Vec<u64>, keeper: Pubkey) -> Instruction {
+        Instruction::new_with_bytes(
+            stockwoven::id(),
+            &stockwoven::instruction::SetPrices { prices }.data(),
+            stockwoven::accounts::SetPrices { keeper, vault: self.vault, basket: self.basket() }.to_account_metas(None),
+        )
+    }
+
+    fn set_prices(&mut self, prices: Vec<u64>) -> Result<u64, String> {
+        let ix = self.set_prices_ix(prices, self.keeper.pubkey());
+        self.keeper_send(&[ix])
+    }
+
+    fn basket_account(&self) -> Basket {
+        Basket::try_deserialize(&mut self.svm.get_account(&self.basket()).unwrap().data.as_slice()).unwrap()
+    }
+
+    /// Fixed accounts of `deposit_single` / `redeem_single`, then (reserve, mint) per asset, the
+    /// pools, and the optional conversion pool.
+    fn single_ix(&self, user: &User, asset: usize, data: Vec<u8>, swap: Option<PoolKeys>) -> Instruction {
+        let mut metas = stockwoven::accounts::Single {
+            user: user.kp.pubkey(),
+            vault: self.vault,
+            basket: self.basket(),
+            share_mint: self.share_mint,
+            user_shares: user.shares,
+            user_token: user.tokens[asset],
+            mint: self.assets[asset].mint,
+            damm_pool_authority: DAMM_POOL_AUTHORITY,
+            damm_event_authority: DAMM_EVENT_AUTHORITY,
+            damm_program: cp_amm::ID,
+            token_program: TOKEN_PROGRAM,
+            token_2022_program: TOKEN_2022_PROGRAM,
+            share_token_program: TOKEN_PROGRAM,
+        }
+        .to_account_metas(None);
+        for a in &self.assets {
+            metas.push(AccountMeta::new(a.reserve, false));
+            metas.push(AccountMeta::new_readonly(a.mint, false));
+        }
+        for p in &self.pools {
+            metas.push(AccountMeta::new(p.pool, false));
+            metas.push(AccountMeta::new(p.position, false));
+            metas.push(AccountMeta::new_readonly(p.nft_account, false));
+            metas.push(AccountMeta::new(p.vault_a, false));
+            metas.push(AccountMeta::new(p.vault_b, false));
+        }
+        if let Some(p) = swap {
+            metas.push(AccountMeta::new(p.pool, false));
+            metas.push(AccountMeta::new(p.vault_a, false));
+            metas.push(AccountMeta::new(p.vault_b, false));
+            metas.push(AccountMeta::new_readonly(self.assets[p.a].mint, false));
+            metas.push(AccountMeta::new_readonly(self.assets[p.b].mint, false));
+        }
+        Instruction::new_with_bytes(stockwoven::id(), &data, metas)
+    }
+
+    fn deposit_single(&mut self, user: &User, asset: usize, amount_in: u64, swap: Option<PoolKeys>) -> Result<u64, String> {
+        let ix = self.single_ix(user, asset, stockwoven::instruction::DepositSingle { amount_in, min_shares: 0 }.data(), swap);
+        send(&mut self.svm, &[ix], &user.kp, &[&user.kp])
+    }
+
+    fn redeem_single(&mut self, user: &User, asset: usize, shares: u64, min_amount: u64) -> Result<u64, String> {
+        let ix = self.single_ix(user, asset, stockwoven::instruction::RedeemSingle { shares, min_amount }.data(), None);
+        send(&mut self.svm, &[ix], &user.kp, &[&user.kp])
+    }
+
+    fn shares_of(&self, user: &User) -> u64 {
+        balance(&self.svm, &user.shares)
+    }
+
+    /// Shares a deposit worth `usd` would mint with no fee.
+    fn fair_shares(&self, usd: f64) -> f64 {
+        usd / self.vault_value() * share_supply(&self.svm, &self.share_mint) as f64
+    }
+
+    /// Share of the vault's value in asset `k`, in bps.
+    fn weight(&self, k: usize) -> f64 {
+        let holdings = self.holdings();
+        let mut one = vec![0; holdings.len()];
+        one[k] = holdings[k];
+        self.value(&one) / self.value(&holdings) * 10_000.0
+    }
+}
+
+fn single_deposits_value_issuer_tokens_one_to_one(issuers: Issuers) {
+    let mut env = Env::new(issuers);
+    env.setup_basket();
+    assert!((env.weight(SPCX) - 3_000.0).abs() < 1.0 && (env.weight(SPCXON) - 1_000.0).abs() < 1.0);
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    let per_share = env.value_per_share();
+
+    // SPCX is overweight (30% against 25%): 5 bps plus 2 bps per point at the midpoint, ~15 bps.
+    let fair = env.fair_shares(10.0 * 168.0);
+    env.deposit_single(&user, SPCX, env.raw(SPCX, 10.0), None).unwrap();
+    let for_spcx = env.shares_of(&user) as f64;
+    let fee = 1.0 - for_spcx / fair;
+    assert!(fee > 0.0013 && fee < 0.0017, "SPCX fee {fee}");
+
+    // SPCXon is underweight (10% against 25%): the deposit earns the 3 bps discount.
+    let fair = env.fair_shares(10.0 * 168.0);
+    env.deposit_single(&user, SPCXON, env.raw(SPCXON, 10.0), None).unwrap();
+    let for_ondo = env.shares_of(&user) as f64 - for_spcx;
+    assert!((for_ondo / fair - 1.0003).abs() < 2e-6, "SPCXon {}", for_ondo / fair);
+
+    // The tokens wait idle for the keeper, and the net fee stays with the holders.
+    assert_eq!(env.reserves()[SPCX], env.raw(SPCX, 10.0));
+    assert!(env.value_per_share() > per_share);
+}
+
+#[test]
+fn single_deposits_value_issuer_tokens_one_to_one_spl() {
+    single_deposits_value_issuer_tokens_one_to_one(Issuers::Spl);
+}
+
+#[test]
+fn single_deposits_value_issuer_tokens_one_to_one_token_2022() {
+    single_deposits_value_issuer_tokens_one_to_one(Issuers::Token2022);
+}
+
+#[test]
+fn caps_refuse_a_token_and_conversion_redirects_it() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+
+    // SPCXx already sits at its 40% cap.
+    expect_error(env.deposit_single(&user, SPCXX, env.raw(SPCXX, 1.0), None), "AssetAtCap");
+    // Routed through the vault's SPCXon/SPCXx pool, it becomes SPCXon, which is underweight.
+    let ondo_before = env.reserves()[SPCXON];
+    let fair = env.fair_shares(0.5 * 168.0);
+    env.deposit_single(&user, SPCXX, env.raw(SPCXX, 0.5), Some(env.pools[P_ONDO as usize])).unwrap();
+    assert!(env.reserves()[SPCXON] > ondo_before);
+    assert!(env.shares_of(&user) as f64 > fair * 0.98, "{} vs {fair}", env.shares_of(&user));
+    // Never into SPCX, which is above its target.
+    expect_error(env.deposit_single(&user, SPCXX, env.raw(SPCXX, 0.5), Some(env.pools[P_STOCKS as usize])), "NotUnderweight");
+}
+
+#[test]
+fn usdc_is_converted_into_an_underweight_issuer_token() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    let usdc = env.raw(USDC, 1_680.0);
+
+    // The vault never takes USDC at its own valuation: it has to be converted.
+    expect_error(env.deposit_single(&user, USDC, usdc, None), "NotAStock");
+    // The vault's SPCX/USDC pool would turn it into SPCX, which is overweight.
+    expect_error(env.deposit_single(&user, USDC, usdc, Some(env.pools[P_USDC as usize])), "NotUnderweight");
+
+    // A market SPCXon/USDC pool turns it into Ondo's token, the most underweight.
+    let market = env.external_pool(SPCXON, USDC, 1.0, 1_000.0);
+    let ondo_before = env.reserves()[SPCXON];
+    let per_share = env.value_per_share();
+    env.deposit_single(&user, USDC, usdc, Some(market)).unwrap();
+    assert!(env.reserves()[SPCXON] > ondo_before);
+    assert_eq!(env.reserves()[USDC], 0);
+    // $1,680 less the market pool's 0.3% fee and ~1% price impact, plus the vault's discount.
+    let got = env.shares_of(&user) as f64 / ONE_SHARE as f64 * per_share;
+    assert!(got > 1_680.0 * 0.98 && got < 1_680.0, "${got}");
+}
+
+#[test]
+fn circuit_breaker_stops_a_token_that_leaves_the_band() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    env.deposit_all(&user, 10 * ONE_SHARE).unwrap();
+
+    // Someone dumps SPCXon into the vault's SPCXon/SPCXx pool: it now trades ~3% under SPCXx.
+    let ondo = env.pools[P_ONDO as usize];
+    env.trade(ondo, true, 1.5);
+    // The keeper's prices still say 1:1, so that pool is outside the band and every single-token
+    // trade stops, whichever token it is in.
+    expect_error(env.deposit_single(&user, SPCX, env.raw(SPCX, 1.0), None), "PoolOutOfBand");
+    expect_error(env.redeem_single(&user, SPCXX, ONE_SHARE, 0), "PoolOutOfBand");
+
+    // The keeper posts the market: SPCXon at the pool's price, outside the 2% band.
+    let (_, ra, rb) = pool_state(&env.svm, &ondo.pool);
+    let mut prices = env.market_prices();
+    prices[SPCXON] = ((rb as f64 / 1e8) / (ra as f64 / 1e9) * 1e9) as u64;
+    assert!(prices[SPCXON] < 980_000_000, "{}", prices[SPCXON]);
+    env.set_prices(prices).unwrap();
+
+    // The vault stops taking or paying out SPCXon alone...
+    expect_error(env.deposit_single(&user, SPCXON, env.raw(SPCXON, 1.0), None), "TokenDepegged");
+    expect_error(env.redeem_single(&user, SPCXON, ONE_SHARE, 0), "TokenDepegged");
+    // ...and never converts into it.
+    let market = env.external_pool(SPCXON, USDC, 1.0, 1_000.0);
+    expect_error(env.deposit_single(&user, USDC, env.raw(USDC, 168.0), Some(market)), "TokenDepegged");
+    // The other issuers carry on, and in-kind redemption never needs a price.
+    env.deposit_single(&user, SPCX, env.raw(SPCX, 1.0), None).unwrap();
+    env.redeem_single(&user, SPCX, ONE_SHARE, 0).unwrap();
+    env.redeem(&user, ONE_SHARE, vec![0; 5]).unwrap();
+}
+
+#[test]
+fn stale_prices_halt_single_token_trades_only() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    env.deposit_all(&user, 5 * ONE_SHARE).unwrap();
+
+    env.set_clock(NOW + 601);
+    expect_error(env.deposit_single(&user, SPCX, env.raw(SPCX, 1.0), None), "PricesStale");
+    expect_error(env.redeem_single(&user, SPCXX, ONE_SHARE, 0), "PricesStale");
+    env.deposit_all(&user, ONE_SHARE).unwrap();
+    env.redeem(&user, ONE_SHARE, vec![0; 5]).unwrap();
+
+    let prices = env.market_prices();
+    env.set_prices(prices).unwrap();
+    assert_eq!(env.basket_account().prices_updated_at, NOW + 601);
+    env.deposit_single(&user, SPCX, env.raw(SPCX, 1.0), None).unwrap();
+}
+
+#[test]
+fn redeem_single_pays_one_token_with_the_dynamic_fee() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    env.deposit_all(&user, 50 * ONE_SHARE).unwrap();
+    let per_share = env.value_per_share();
+    let fair = 20.0 * per_share;
+    // Nothing idle: every token paid out comes out of the pools.
+    assert!(env.reserves().iter().all(|&r| r < 10));
+
+    // SPCXx is overweight (40% against 30%): taking it out rebalances the vault, at a discount.
+    let before = env.balances(&user)[SPCXX];
+    env.redeem_single(&user, SPCXX, 20 * ONE_SHARE, 0).unwrap();
+    let got = (env.balances(&user)[SPCXX] - before) as f64 / 1e8 * 168.0;
+    assert!((got / fair - 1.0003).abs() < 1e-5, "SPCXx {}", got / fair);
+
+    // SPCXon is underweight (10% against 25%): taking it out costs more, ~36 bps.
+    let before = env.balances(&user)[SPCXON];
+    env.redeem_single(&user, SPCXON, 20 * ONE_SHARE, 0).unwrap();
+    let got = (env.balances(&user)[SPCXON] - before) as f64 / 1e9 * 168.0;
+    let fee = 1.0 - got / fair;
+    assert!(fee > 0.0030 && fee < 0.0040, "SPCXon fee {fee}");
+
+    // The other side of the liquidity taken out stays in the vault, idle, for the keeper.
+    assert!(env.reserves()[SPCX] > 0);
+    // Holders end up ahead: the fees outweigh the discount.
+    assert!(env.value_per_share() > per_share);
+    expect_error(env.redeem_single(&user, SPCXX, ONE_SHARE, u64::MAX), "SlippageExceeded");
+    // Only issuer tokens are paid out alone.
+    expect_error(env.redeem_single(&user, USDC, ONE_SHARE, 0), "NotAStock");
+}
+
+#[test]
+fn a_single_token_round_trip_never_profits() {
+    let mut env = Env::new(Issuers::Spl);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    let start = env.balances(&user)[SPCXON];
+    // In with the discount...
+    env.deposit_single(&user, SPCXON, env.raw(SPCXON, 10.0), None).unwrap();
+    // ...and straight back out, which pays for the imbalance it now leaves.
+    let shares = env.shares_of(&user);
+    env.redeem_single(&user, SPCXON, shares, 0).unwrap();
+    let end = env.balances(&user)[SPCXON];
+    assert!(end < start, "{start} -> {end}");
+}
+
+#[test]
+fn only_the_admin_sets_the_basket_and_only_the_keeper_posts_prices() {
+    let mut env = Env::new(Issuers::Spl);
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    // No basket, no single-token deposits.
+    expect_error(env.deposit_single(&user, SPCX, env.raw(SPCX, 1.0), None), "AccountNotInitialized");
+    env.setup_basket();
+
+    let outsider = env.trader.kp.insecure_clone();
+    let ix = env.set_prices_ix(env.market_prices(), outsider.pubkey());
+    expect_error(send(&mut env.svm, &[ix], &outsider, &[&outsider]), "NotKeeper");
+    let ix = env.set_basket_ix(outsider.pubkey(), basket_params(), weights());
+    expect_error(send(&mut env.svm, &[ix], &outsider, &[&outsider]), "Unauthorized");
+
+    let admin = env.admin.pubkey();
+    let mut too_heavy = weights();
+    too_heavy[USDC].target_weight_bps = 5_000;
+    expect_error(env.admin_send(&[env.set_basket_ix(admin, basket_params(), too_heavy)], &[]), "InvalidWeight");
+    let mut above_cap = weights();
+    above_cap[SPCX].target_weight_bps = 4_500;
+    expect_error(env.admin_send(&[env.set_basket_ix(admin, basket_params(), above_cap)], &[]), "InvalidWeight");
+    let wide = BasketParams { band_bps: 2_000, ..basket_params() };
+    expect_error(env.admin_send(&[env.set_basket_ix(admin, wide, weights())], &[]), "InvalidBasket");
+    expect_error(env.admin_send(&[env.set_basket_ix(admin, basket_params(), weights()[..4].to_vec())], &[]), "WrongAccountCount");
+
+    // Capping Ondo at 10%, where it already sits, closes it to deposits.
+    let mut capped = weights();
+    capped[SPCXON] = AssetWeights { is_stock: true, target_weight_bps: 1_000, max_weight_bps: 1_000 };
+    env.admin_send(&[env.set_basket_ix(admin, basket_params(), capped)], &[]).unwrap();
+    assert_eq!(env.basket_account().assets[SPCXON].weights.max_weight_bps, 1_000);
+    expect_error(env.deposit_single(&user, SPCXON, env.raw(SPCXON, 1.0), None), "AssetAtCap");
+}
+
+/// Compute units of the single-token instructions, printed with `--nocapture cu_profile_single`.
+#[test]
+fn cu_profile_single() {
+    let mut env = Env::new(Issuers::Token2022);
+    env.setup_basket();
+    let user = env.user([100.0, 100.0, 100.0, 50_000.0, 500.0]);
+    let market = env.external_pool(SPCXON, USDC, 1.0, 1_000.0);
+    let direct = env.deposit_single(&user, SPCXON, env.raw(SPCXON, 1.0), None).unwrap();
+    let converted = env.deposit_single(&user, USDC, env.raw(USDC, 168.0), Some(market)).unwrap();
+    let out = env.redeem_single(&user, SPCXX, ONE_SHARE, 0).unwrap();
+    for (label, cu) in [("deposit_single", direct), ("deposit_single (USDC, converted)", converted), ("redeem_single (from pools)", out)] {
+        println!("{label:<34} {cu:>9} CU");
+        assert!(cu < 1_400_000, "{label}");
+    }
 }

@@ -48,3 +48,16 @@ pub const DAMM_POOL_AUTHORITY: Pubkey = pubkey!("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B
 pub const DAMM_EVENT_AUTHORITY: Pubkey = pubkey!("3rmHSu74h1ZcmAisVcWerTCiRDQbUrBKmcwptYGjHfet");
 
 pub const DAMM_CUSTOMIZABLE_POOL_SEED: &[u8] = b"cpool";
+
+#[constant]
+pub const BASKET_SEED: &[u8] = b"basket";
+
+/// Value unit of the basket: one share of the stock is 1e9 nano-shares.
+pub const NANO_SHARES_PER_SHARE: u64 = 1_000_000_000;
+
+/// Upper bound on the circuit-breaker band, in basis points (10%).
+pub const MAX_BAND_BPS: u16 = 1_000;
+
+/// Upper bound on the basket's fee and discount, in basis points (10% and 1%).
+pub const MAX_BASKET_FEE_BPS: u16 = 1_000;
+pub const MAX_BASKET_DISCOUNT_BPS: u16 = 100;

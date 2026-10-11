@@ -77,3 +77,44 @@ pub struct Harvested {
     pub amount_a: u64,
     pub amount_b: u64,
 }
+
+#[event]
+pub struct BasketSet {
+    pub vault: Pubkey,
+    pub params: crate::state::BasketParams,
+    pub weights: Vec<crate::state::AssetWeights>,
+}
+
+#[event]
+pub struct PricesSet {
+    pub vault: Pubkey,
+    pub prices: Vec<u64>,
+    pub updated_at: i64,
+}
+
+/// A deposit of one token. `mint_in`/`amount_in` is what the user paid; when the vault converted
+/// it, `mint`/`amount` is the issuer token it became. `value` is in nano-shares of the stock and
+/// `fee_bps` is negative for a discount.
+#[event]
+pub struct DepositedSingle {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+    pub mint_in: Pubkey,
+    pub amount_in: u64,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub value: u64,
+    pub fee_bps: i16,
+    pub shares: u64,
+}
+
+#[event]
+pub struct RedeemedSingle {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+    pub shares: u64,
+    pub mint: Pubkey,
+    pub amount: u64,
+    pub value: u64,
+    pub fee_bps: i16,
+}

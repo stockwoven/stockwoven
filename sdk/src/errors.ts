@@ -28,6 +28,14 @@ export const VAULT_ERRORS = [
   ["SlippageExceeded", "The pools moved past the limit. Quote again and retry."],
   ["InvalidRoute", "The arbitrage route does not return to its start token."],
   ["NotProfitable", "The arbitrage did not reach its minimum profit."],
+  ["InvalidBasket", "The vault's basket settings do not cover every asset yet."],
+  ["PricesStale", "The keeper's prices are out of date, so single-token deposits and redemptions are paused. Deposit with the mix or redeem in kind, or retry in a minute."],
+  ["PoolOutOfBand", "A vault pool trades outside the band around the keeper's prices, so single-token deposits and redemptions are paused. Deposit with the mix or redeem in kind."],
+  ["TokenDepegged", "This token trades outside its 1:1 band, so the vault is not taking it or paying it out alone. Use another token, or redeem in kind."],
+  ["AssetAtCap", "This token is at its cap in the vault. Pay with another token: the SDK converts it into one the vault needs."],
+  ["NotAStock", "Only issuer tokens of the stock go in or out alone; USDC and SOL are converted first."],
+  ["NotUnderweight", "The vault only converts deposits into a token below its target weight. Quote again."],
+  ["InsufficientLiquidity", "The vault does not hold enough of this token. Choose another token, or redeem in kind."],
 ] as const;
 
 export type ErrorKind =

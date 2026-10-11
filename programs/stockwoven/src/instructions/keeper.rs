@@ -274,7 +274,7 @@ pub struct VaultSwap<'info> {
 
 /// Wires a cp-amm pool to the vault reserves of its two mints, which must be vault assets.
 #[allow(clippy::too_many_arguments)]
-fn external_side<'a, 'info>(
+pub(crate) fn external_side<'a, 'info>(
     vault: &Vault,
     pool: &'a AccountInfo<'info>,
     token_a_vault: &'a AccountInfo<'info>,

@@ -1,6 +1,6 @@
 # Redeem.
 
-Burn swSPCX and take your slice of every token the vault holds, or receive it all as USDC. The vault never pauses redemptions.
+Burn swSPCX and take your slice of every token the vault holds, or receive one token: USDC or one issuer's SpaceX token. The vault never pauses redemptions in kind.
 
 ## How a redemption works
 
@@ -13,11 +13,15 @@ You receive all of it in kind, in one transaction: SPCXx, SPCX, SPCXon, USDC and
 
 Redeeming a very small amount can round one token down to zero. If that makes cp-amm reject the withdrawal, the transaction fails and you keep your swSPCX.
 
-## Receive USDC
+## Receive one token
 
-If you'd rather get one token back, the app can redeem in kind and swap everything you receive to USDC in the same transaction. The swaps go through the vault's pools and market pools.
+If you'd rather get one token back, the vault can pay your swSPCX's value in one issuer's SpaceX token, at 1:1, in one transaction. It pays from its idle reserve first, then takes liquidity out of the pools that hold that token.
 
-It costs the pool fee on every swap (0.30% in the vault's pools) and their price impact. There is no vault fee. The app shows the USDC you'll receive before you sign, and the transaction fails if any swap fills worse than its limit.
+It charges the same vault fee as a deposit, the other way round: taking out a token the vault holds too much of is cheapest, down to a 0.03% discount, and taking out one it holds too little of costs more, up to 1%. The fee stays with the holders who remain.
+
+To receive USDC, the app redeems into the issuer token that sells for the most and sells it in the same transaction, paying that swap's pool fee and price impact. The app shows what you'll receive before you sign.
+
+The same circuit breaker as for deposits applies: a token more than 2% away from the others is not paid out alone, and single-token redemptions stop while the keeper's prices are stale. Then the app redeems in kind and swaps to USDC instead. Redeeming in kind never depends on prices.
 
 ## Slippage limit
 

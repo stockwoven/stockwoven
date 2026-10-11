@@ -77,6 +77,8 @@ export type Devnet = {
   pools: PoolInfo[];
   marketPools: PoolInfo[];
   lookupTable?: string;
+  /** Single-token deposits and redemptions: ["basket", vault]. */
+  basket?: string;
   launch: { stockUsd: number; solUsd: number; seedShares: string };
 };
 
@@ -320,6 +322,151 @@ export function setPoolWeightsIx(d: Devnet, weights: number[]) {
     programId: STOCKWOVEN,
     data: Buffer.concat([disc("set_pool_weights"), u32(weights.length), ...weights.map(u16)]),
     keys: [r(admin.publicKey, true), w(pk(d.vault))],
+  });
+}
+
+// ---- basket: single-token deposits and redemptions ------------------------------------------
+
+export const basketAddress = (vault: PublicKey) => pda([Buffer.from("basket"), vault.toBuffer()], STOCKWOVEN);
+
+/** One share of the stock, in the basket's value unit. */
+export const NANO_SHARES = 1_000_000_000n;
+
+export type BasketParams = {
+  bandBps: number;
+  baseFeeBps: number;
+  feeSlopeBps: number;
+  maxFeeBps: number;
+  maxDiscountBps: number;
+  maxPriceAge: number;
+};
+
+export type AssetWeights = { isStock: boolean; targetBps: number; maxBps: number };
+
+export type BasketState = {
+  params: BasketParams;
+  assets: (AssetWeights & { price: bigint })[];
+  pricesUpdatedAt: number;
+};
+
+/** 2% band, 5 bps plus 2 bps per point away from target, at most 1%, at best a 3 bps discount. */
+export const DEFAULT_BASKET: BasketParams = { bandBps: 200, baseFeeBps: 5, feeSlopeBps: 2, maxFeeBps: 100, maxDiscountBps: 3, maxPriceAge: 600 };
+
+const basketArgs = (p: BasketParams, weights: AssetWeights[]) =>
+  Buffer.concat([
+    u16(p.bandBps), u16(p.baseFeeBps), u16(p.feeSlopeBps), u16(p.maxFeeBps), u16(p.maxDiscountBps), u32(p.maxPriceAge),
+    u32(weights.length), ...weights.map((x) => Buffer.concat([u8(x.isStock ? 1 : 0), u16(x.targetBps), u16(x.maxBps)])),
+  ]);
+
+export function initBasketIx(d: Devnet, params: BasketParams, weights: AssetWeights[]) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("init_basket"), basketArgs(params, weights)]),
+    keys: [w(admin.publicKey, true), r(pk(d.vault)), w(basketAddress(pk(d.vault))), r(SystemProgram.programId)],
+  });
+}
+
+export function setBasketIx(d: Devnet, params: BasketParams, weights: AssetWeights[]) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("set_basket"), basketArgs(params, weights)]),
+    keys: [r(admin.publicKey, true), r(pk(d.vault)), w(basketAddress(pk(d.vault)))],
+  });
+}
+
+/** Keeper: nano-shares of the stock per whole token, one per asset. */
+export function setPricesIx(d: Devnet, prices: bigint[]) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("set_prices"), vecU64(prices)]),
+    keys: [r(admin.publicKey, true), r(pk(d.vault)), w(basketAddress(pk(d.vault)))],
+  });
+}
+
+/** Basket account: 8 discriminator, vault 32, bump 1, params 14, num_assets 1, 6 × 13 per asset, updated_at 8. */
+export function decodeBasket(data: Buffer, numAssets: number): BasketState {
+  const params: BasketParams = {
+    bandBps: data.readUInt16LE(41),
+    baseFeeBps: data.readUInt16LE(43),
+    feeSlopeBps: data.readUInt16LE(45),
+    maxFeeBps: data.readUInt16LE(47),
+    maxDiscountBps: data.readUInt16LE(49),
+    maxPriceAge: data.readUInt32LE(51),
+  };
+  const assets = Array.from({ length: numAssets }, (_, k) => {
+    const o = 56 + k * 13;
+    return { isStock: data[o] === 1, targetBps: data.readUInt16LE(o + 1), maxBps: data.readUInt16LE(o + 3), price: data.readBigUInt64LE(o + 5) };
+  });
+  return { params, assets, pricesUpdatedAt: Number(data.readBigInt64LE(56 + 6 * 13)) };
+}
+
+export async function readBasket(d: Devnet): Promise<BasketState | null> {
+  const info = await conn.getAccountInfo(basketAddress(pk(d.vault)));
+  return info ? decodeBasket(Buffer.from(info.data), d.assets.length) : null;
+}
+
+/** Cap per issuer token: no issuer above 40% of the vault. USDC and SOL are uncapped. */
+export const ISSUER_CAP_BPS = 4_000;
+
+/**
+ * Per-asset targets implied by the pools' target weights: a full-range pool holds half its value
+ * in each token. Keeping the basket's targets in line with the pools stops the dynamic fee from
+ * pulling against the keeper's rebalancing. A target is never above its token's cap.
+ */
+export function basketWeights(d: Devnet, poolWeights: number[]): AssetWeights[] {
+  const targets = d.assets.map(() => 0);
+  d.pools.forEach((p, i) => {
+    targets[p.a] += poolWeights[i] / 2;
+    targets[p.b] += poolWeights[i] / 2;
+  });
+  return d.assets.map((a, k) => {
+    const maxBps = a.kind === "stock" ? ISSUER_CAP_BPS : 10_000;
+    return { isStock: a.kind === "stock", targetBps: Math.min(Math.floor(targets[k]), maxBps), maxBps };
+  });
+}
+
+/** USD per one share of the stock: the median of the issuer tokens' USD prices. */
+export function stockUsd(d: Devnet, px: number[]) {
+  const stocks = d.assets.map((a, k) => (a.kind === "stock" ? px[k] : 0)).filter((x) => x > 0).sort((a, b) => a - b);
+  return stocks.length ? stocks[Math.floor((stocks.length - 1) / 2)] : 0;
+}
+
+/** The keeper's prices for `set_prices`: each asset's USD price in nano-shares of the stock. */
+export function basketPrices(d: Devnet, px: number[]): bigint[] {
+  const share = stockUsd(d, px);
+  return px.map((usd) => BigInt(Math.max(1, Math.round((usd / share) * 1e9))));
+}
+
+/** Fixed accounts of `deposit_single` / `redeem_single`, then (reserve, mint) per asset, the pools, and an optional conversion pool. */
+function singleKeys(d: Devnet, user: PublicKey, asset: number, convert?: PoolInfo) {
+  const shareMint = pk(d.shareMint);
+  const a = d.assets[asset];
+  return [
+    r(user, true), r(pk(d.vault)), r(basketAddress(pk(d.vault))), w(shareMint), w(ata(user, shareMint)),
+    w(ata(user, pk(a.mint), pk(a.tokenProgram))), r(pk(a.mint)), r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
+    r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID), r(TOKEN_PROGRAM_ID),
+    ...d.assets.flatMap((x) => [w(pk(x.reserve)), r(pk(x.mint))]),
+    ...d.pools.flatMap((p) => [w(pk(p.pool)), w(pk(p.position!)), r(pk(p.positionNftAccount!)), w(pk(p.tokenAVault)), w(pk(p.tokenBVault))]),
+    ...(convert
+      ? [w(pk(convert.pool)), w(pk(convert.tokenAVault)), w(pk(convert.tokenBVault)), r(pk(d.assets[convert.a].mint)), r(pk(d.assets[convert.b].mint))]
+      : []),
+  ];
+}
+
+/** Deposits `amountIn` of one asset; with `convert`, the vault first swaps it on that pool into an underweight issuer token. */
+export function depositSingleIx(d: Devnet, user: PublicKey, asset: number, amountIn: bigint, minShares: bigint, convert?: PoolInfo) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("deposit_single"), u64(amountIn), u64(minShares)]),
+    keys: singleKeys(d, user, asset, convert),
+  });
+}
+
+export function redeemSingleIx(d: Devnet, user: PublicKey, asset: number, shares: bigint, minAmount: bigint) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("redeem_single"), u64(shares), u64(minAmount)]),
+    keys: singleKeys(d, user, asset),
   });
 }
 

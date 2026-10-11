@@ -79,6 +79,13 @@ export function explainError(e: unknown) {
   if (/DepositsPaused|Deposits are paused|0x1772\b|"Custom":6002\b/i.test(message)) return "Deposits are paused by the vault. Redemptions stay open.";
   if (/InstructionFallbackNotFound|0x65\b|"Custom":101\b/.test(message)) return "The devnet vault program does not support this yet. It needs the latest program upgrade.";
   if (/slippage|0x1786\b|"Custom":6022\b/i.test(message)) return "The pools moved past your slippage limit. Refresh the quote and try again.";
+  // Single-token deposits and redemptions (the basket): 6026–6032.
+  if (/PricesStale|0x178a\b|"Custom":6026\b/.test(message)) return "The keeper's prices went out of date. Single-token trades resume when it posts new ones; the vault mix and in-kind redemptions still work.";
+  if (/PoolOutOfBand|0x178b\b|"Custom":6027\b/.test(message)) return "A vault pool moved outside the 2% band, so single-token trades are paused. The vault mix and in-kind redemptions still work.";
+  if (/TokenDepegged|0x178c\b|"Custom":6028\b/.test(message)) return "That token moved outside its 1:1 band, so the vault stopped taking it alone. Use another token, or redeem in kind.";
+  if (/AssetAtCap|0x178d\b|"Custom":6029\b/.test(message)) return "That token reached its cap in the vault. Refresh the quote: it will be converted into one the vault needs.";
+  if (/NotUnderweight|0x178f\b|"Custom":6031\b/.test(message)) return "The vault's weights moved since the quote. Refresh it and try again.";
+  if (/InsufficientLiquidity|0x1790\b|"Custom":6032\b/.test(message)) return "The vault does not hold enough of that token. Choose another, or redeem in kind.";
   return message;
 }
 
@@ -155,15 +162,20 @@ export function useFaucet(onDone: () => void) {
     if (!publicKey) return;
     setStatus({ kind: "pending", text: "Sending 10 of each mock SpaceX token, 2,000 test USDC and devnet SOL for fees." });
     try {
-      const res = await fetch("/api/faucet", { method: "POST", body: JSON.stringify({ owner: publicKey.toBase58() }) });
+      const res = await fetch("/api/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner: publicKey.toBase58() }),
+      });
       const body = await res.json().catch(() => ({}));
       if (res.ok) {
         setStatus({ kind: "ok", text: "10 SPCXx, 10 SPCX, 10 SPCXon and 2,000 test USDC are in your wallet.", signature: body.signature });
         onDone();
       } else if (res.status === 429) {
-        setStatus({ kind: "err", text: "The faucet sends once a minute per wallet. Try again in a minute." });
+        const busy = String(body.error ?? "").includes("busy");
+        setStatus({ kind: "err", text: busy ? "The faucet has sent all it can this hour. Try again later." : "The faucet sends once a minute per wallet. Try again in a minute." });
       } else {
-        setStatus({ kind: "err", text: `The faucet could not send: ${body.error ?? res.statusText}.` });
+        setStatus({ kind: "err", text: "The faucet could not send right now. Try again in a minute." });
       }
     } catch (e) {
       setStatus({ kind: "err", text: explainError(e) });

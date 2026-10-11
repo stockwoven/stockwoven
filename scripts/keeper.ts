@@ -6,7 +6,9 @@
 //    small idle buffer that funds arbitrage;
 // 3. rebalances towards the targets: takes liquidity out of overweight pools, swaps the idle
 //    tokens into the pair an underweight pool needs, and adds it there;
-// 4. harvests the protocol's cut from every pool once an hour.
+// 4. harvests the protocol's cut from every pool once an hour;
+// 5. posts market prices to the basket (`set_prices`), which single-token deposits and
+//    redemptions need fresh, and keeps the basket's target weights in line with the pools.
 //
 //   KEYPAIR=//wsl.localhost/Ubuntu/home/pedro/.config/solana/id.json npx tsx scripts/keeper.ts [--once]
 //
@@ -25,6 +27,8 @@ import {
   admin,
   arbitrageIx,
   ata,
+  basketPrices,
+  basketWeights,
   harvestIx,
   holdings,
   lookupTable,
@@ -35,9 +39,13 @@ import {
   readDevnet,
   readState,
   rebalanceAddIx,
+  readBasket,
   rebalanceRemoveIx,
   sendV0,
+  setBasketIx,
   setPoolWeightsIx,
+  setPricesIx,
+  stockUsd,
   valueOf,
   vaultSwapIx,
 } from "./sw.ts";
@@ -49,8 +57,12 @@ const IDLE_BUFFER_BPS = 500;
 /** A pool is rebalanced once it is this far from its target, relative to the target. */
 const REBALANCE_BAND = 0.15;
 const MIN_MOVE_USD = 5;
-/** No single vault swap takes more than this share of the input side of a pool. */
-const MAX_IMPACT = 0.02;
+/**
+ * No single vault swap takes more than this share of the input side of a pool. 0.4% moves an
+ * x·y = k price by under 1%, inside the basket's ±2% band: bigger swaps between two issuer tokens
+ * would trip the circuit breaker that single-token deposits depend on.
+ */
+const MAX_IMPACT = 0.004;
 /** Weights move by at most this much per tick. */
 const MAX_WEIGHT_STEP_BPS = 500;
 const HARVEST_EVERY_SEC = 3_600;
@@ -334,6 +346,35 @@ async function harvest(d: Devnet, k: KeeperState) {
   log("harvested every pool's protocol fee to the treasury", sig);
 }
 
+// ---- 5. basket prices -----------------------------------------------------------------------
+
+/**
+ * Posts each asset's price in SpaceX shares, read from the pools after this tick's trades, and
+ * moves the basket's targets with the pools' weights. An issuer token further than the band from
+ * the others is reported: the vault has stopped taking it in or paying it out alone.
+ */
+async function postPrices(d: Devnet) {
+  const basket = await readBasket(d);
+  if (!basket) return;
+  const s = await readState(d);
+  const px = prices(d, s);
+  const next = basketPrices(d, px);
+  const ixs = [setPricesIx(d, next)];
+  const weights = basketWeights(d, s.weights);
+  if (weights.some((w, k) => w.targetBps !== basket.assets[k].targetBps || w.maxBps !== basket.assets[k].maxBps)) {
+    ixs.push(setBasketIx(d, basket.params, weights));
+  }
+  const sig = await sendV0(ixs, [admin]);
+  const band = basket.params.bandBps / 10_000;
+  const off = d.assets
+    .map((a, k) => ({ a, gap: Number(next[k]) / 1e9 - 1 }))
+    .filter(({ a, gap }) => a.kind === "stock" && Math.abs(gap) > band)
+    .map(({ a, gap }) => `${a.symbol} ${(gap * 100).toFixed(1)}%`);
+  const synced = ixs.length > 1 ? ", targets synced" : "";
+  const outside = off.length ? ` · outside the band: ${off.join(", ")}` : "";
+  log(`prices: 1 share = ${fmt(stockUsd(d, px))}${synced}${outside}`, sig);
+}
+
 async function report(d: Devnet) {
   const s = await readState(d);
   const px = prices(d, s);
@@ -357,6 +398,12 @@ async function tick() {
     log("tick failed:", String(e).slice(0, 300));
   } finally {
     saveState(k);
+  }
+  // Even after a failed step: single-token trades stop once the prices are older than the basket allows.
+  try {
+    await postPrices(d);
+  } catch (e) {
+    log("posting prices failed:", String(e).slice(0, 300));
   }
 }
 

@@ -5,7 +5,8 @@
   "scripts": {
     "devnet:setup": "tsx scripts/devnet-setup.ts",
     "keeper": "tsx scripts/keeper.ts",
-    "traffic": "tsx scripts/traffic.ts"
+    "traffic": "tsx scripts/traffic.ts",
+    "peg": "tsx scripts/peg.ts"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.13",

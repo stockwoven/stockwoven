@@ -14,11 +14,11 @@ No. A share is a pro-rata slice of every position and every reserve, and cp-amm'
 
 ## Can I deposit with just one token?
 
-Yes: USDC, SOL or any issuer's SpaceX token. The app swaps it into the vault's mix and deposits, in one transaction. See [Deposit](/docs/deposit#deposit-with-one-token).
+Yes: USDC, SOL or any issuer's SpaceX token, in one transaction. Issuer tokens count 1:1; USDC and SOL are converted into the issuer token the vault holds least of. See [Deposit](/docs/deposit#deposit-with-one-token).
 
 ## Can I get USDC back?
 
-Yes. The app can redeem in kind and swap everything to USDC in the same transaction. See [Redeem](/docs/redeem#receive-usdc).
+Yes. The vault pays one issuer token, which the app sells for USDC in the same transaction, or you keep that token. See [Redeem](/docs/redeem#receive-usdc).
 
 ## Can redemptions be paused?
 
@@ -30,7 +30,7 @@ Move liquidity between the vault's pools, swap between its reserves and run arbi
 
 ## How does Stockwoven make money?
 
-From 16% of every pool fee, collected by `harvest`, and 20% of every arbitrage profit. There is no deposit or redemption fee. See [Fees](/docs/fees#protocol-revenue).
+From 16% of every pool fee, collected by `harvest`, and 20% of every arbitrage profit. Deposits and redemptions in one token pay a vault fee of up to 1% (or earn a small discount) that stays with holders; with the mix or in kind there is none. See [Fees](/docs/fees#protocol-revenue).
 
 ## Is this on mainnet?
 

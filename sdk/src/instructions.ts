@@ -12,6 +12,7 @@ import {
   createSyncNativeInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
+import { basketAddress } from "./basket.js";
 import { CP_AMM, DAMM_EVENT_AUTHORITY, DAMM_POOL_AUTHORITY, Pool, VaultConfig } from "./config.js";
 
 /** Anchor discriminators: sha256("global:<name>")[..8]. */
@@ -20,6 +21,8 @@ const DISC = {
   redeem: [184, 12, 86, 149, 70, 196, 97, 225],
   harvest: [228, 241, 31, 182, 53, 169, 59, 199],
   swap: [248, 198, 158, 145, 225, 117, 135, 200],
+  depositSingle: [116, 81, 213, 110, 17, 83, 209, 188],
+  redeemSingle: [99, 237, 186, 22, 18, 172, 251, 95],
 };
 
 const u8 = (v: number) => Buffer.from([v]);
@@ -71,6 +74,44 @@ export function redeemIx(cfg: VaultConfig, owner: PublicKey, shares: bigint, min
     programId: cfg.program,
     data: Buffer.concat([Buffer.from(DISC.redeem), u64(shares), vecU64(minAmounts)]),
     keys: holderKeys(cfg, owner),
+  });
+}
+
+/**
+ * Fixed accounts of `deposit_single` / `redeem_single` for asset `k`, then (reserve, mint) per asset,
+ * the vault pools, and the optional conversion pool.
+ */
+function singleKeys(cfg: VaultConfig, owner: PublicKey, k: number, convert?: Pool) {
+  const asset = cfg.assets[k];
+  const keys = [
+    r(owner, true), r(cfg.vault), r(basketAddress(cfg.program, cfg.vault)), w(cfg.share.mint), w(tokenAccount(owner, cfg.share)),
+    w(tokenAccount(owner, asset)), r(asset.mint), r(DAMM_POOL_AUTHORITY), r(DAMM_EVENT_AUTHORITY), r(CP_AMM),
+    r(TOKEN_PROGRAM_ID), r(TOKEN_2022_PROGRAM_ID), r(cfg.share.program),
+    ...cfg.assets.flatMap((a) => [w(a.reserve), r(a.mint)]),
+    ...cfg.pools.flatMap((p) => [w(p.pool), w(p.position!), r(p.positionNftAccount!), w(p.tokenAVault), w(p.tokenBVault)]),
+  ];
+  if (convert) keys.push(w(convert.pool), w(convert.tokenAVault), w(convert.tokenBVault), r(cfg.assets[convert.a].mint), r(cfg.assets[convert.b].mint));
+  return keys;
+}
+
+/**
+ * Deposits `amountIn` of asset `k` alone. With `convert`, the vault first swaps it on that pool into
+ * the pool's other token, an underweight issuer token. Mints at least `minShares`.
+ */
+export function depositSingleIx(cfg: VaultConfig, owner: PublicKey, k: number, amountIn: bigint, minShares: bigint, convert?: Pool) {
+  return new TransactionInstruction({
+    programId: cfg.program,
+    data: Buffer.concat([Buffer.from(DISC.depositSingle), u64(amountIn), u64(minShares)]),
+    keys: singleKeys(cfg, owner, k, convert),
+  });
+}
+
+/** Burns `shares` for issuer token `k` alone, paying at least `minAmount`. */
+export function redeemSingleIx(cfg: VaultConfig, owner: PublicKey, k: number, shares: bigint, minAmount: bigint) {
+  return new TransactionInstruction({
+    programId: cfg.program,
+    data: Buffer.concat([Buffer.from(DISC.redeemSingle), u64(shares), u64(minAmount)]),
+    keys: singleKeys(cfg, owner, k),
   });
 }
 
