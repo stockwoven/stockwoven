@@ -92,6 +92,13 @@ DOMAIN="${DOMAIN:-}"
 if [ -n "${FAUCET_KEYPAIR_PATH:-}" ] && [ ! -f "$FAUCET_KEYPAIR_PATH" ] && [ -z "${FAUCET_SECRET_KEY:-}" ]; then
   echo "note: no faucet key at $FAUCET_KEYPAIR_PATH; the site works, the test-token faucet won't (see deploy/README.md)"
 fi
+# The faucet key must be readable by the service and nobody else.
+if [ -n "${FAUCET_KEYPAIR_PATH:-}" ] && [ -f "$FAUCET_KEYPAIR_PATH" ]; then
+  chown "$SERVICE_USER:$SERVICE_USER" "$FAUCET_KEYPAIR_PATH"
+  chmod 600 "$FAUCET_KEYPAIR_PATH"
+fi
+chown "root:$SERVICE_USER" "$ENV_FILE"
+chmod 640 "$ENV_FILE"
 
 install -m 644 "$REPO/deploy/stockwoven.service" /etc/systemd/system/stockwoven.service
 systemctl daemon-reload
@@ -108,6 +115,10 @@ if [ -n "$DOMAIN" ]; then
     nginx -t || { rm -f "/etc/nginx/sites-enabled/$DOMAIN"; fail "nginx rejected the new site; nothing else changed"; }
     systemctl reload nginx
     echo "nginx site $DOMAIN enabled"
+  elif ! grep -q "server_tokens off" "$SITE"; then
+    # Written once, so a site from an older deploy lacks the newer hardening.
+    echo "note: $SITE predates the hardened config (rate limits, hidden files, HSTS);"
+    echo "      merge the changes from deploy/nginx/stockwoven.conf by hand, then: nginx -t && systemctl reload nginx"
   fi
 else
   echo "note: no domain yet; the app will answer on 127.0.0.1:$PORT only (sudo ./deploy.sh --domain <name>)"
@@ -133,7 +144,9 @@ COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo local)
 say "build ($COMMIT)"
 cd "$APP"
 export NEXT_TELEMETRY_DISABLED=1
-npm ci --include=dev --no-audit --no-fund --loglevel=error
+# --ignore-scripts: this runs as root, so no dependency's install script gets to run code here.
+# The app needs none (native addons fall back to JavaScript).
+npm ci --include=dev --ignore-scripts --no-audit --no-fund --loglevel=error
 npm run build
 [ -f .next/standalone/server.js ] || fail "build has no .next/standalone/server.js (is output: \"standalone\" in app/next.config.ts?)"
 
@@ -144,6 +157,8 @@ mkdir -p "$RELEASE/.next"
 cp -a .next/standalone/. "$RELEASE/"
 cp -a .next/static "$RELEASE/.next/static"
 cp -a public "$RELEASE/public"
+# The only directory the service may write to (see ReadWritePaths in deploy/stockwoven.service).
+mkdir -p "$RELEASE/.next/cache"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$RELEASE"
 
 # The service runs this copy of the Node binary (see deploy/stockwoven.service).

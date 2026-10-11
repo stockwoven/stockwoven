@@ -18,10 +18,35 @@ Restart=on-failure
 RestartSec=3
 
 # O processo só lê o release e a chave do faucet; não precisa de mais nada do sistema.
+# Se alguém conseguir executar código nele, fica preso a isso: sistema de arquivos só leitura,
+# sem /home, sem dispositivos, sem privilégios extras, só rede IPv4/IPv6 e sockets locais.
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=full
+PrivateDevices=true
+ProtectSystem=strict
 ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @cpu-emulation @obsolete
+# Uma chamada bloqueada devolve erro em vez de matar o processo.
+SystemCallErrorNumber=EPERM
+UMask=0077
+# O Next grava o cache de páginas aqui (o ./deploy.sh cria a pasta); é o único lugar onde pode escrever.
+ReadWritePaths=-/var/www/stockwoven/current/.next/cache
 
 [Install]
 WantedBy=multi-user.target
