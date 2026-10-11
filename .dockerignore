@@ -1,0 +1,10 @@
+# Only the keeper image is built from the repository root (deploy/keeper/): it needs the root
+# package files and scripts/, nothing else, and never a key.
+*
+!package.json
+!package-lock.json
+!scripts/
+!deploy/keeper/run.sh
+scripts/_*
+**/*keypair*.json
+**/id.json

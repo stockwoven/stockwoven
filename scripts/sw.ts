@@ -34,8 +34,15 @@ export function loadKeypair(path: string) {
   return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path.replace("~", homedir()), "utf8"))));
 }
 
-/** The admin (upgrade authority, vault admin, keeper and treasury on devnet). */
-export const admin = loadKeypair(process.env.KEYPAIR ?? "~/.config/solana/id.json");
+/** A keypair from `<name>_JSON` (the secret key's JSON array, e.g. a Fly secret) or from the file at `<name>`. */
+export function envKeypair(name: string, fallbackPath: string) {
+  const json = process.env[`${name}_JSON`];
+  return json ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(json))) : loadKeypair(process.env[name] ?? fallbackPath);
+}
+
+/** The signing key: the admin (upgrade authority, vault admin, treasury) for setup scripts, or the
+ *  keeper key when the keeper runs on its own (KEYPAIR / KEYPAIR_JSON). */
+export const admin = envKeypair("KEYPAIR", "~/.config/solana/id.json");
 
 // ---- devnet.json ----------------------------------------------------------------------------
 
@@ -314,6 +321,15 @@ export function arbitrageIx(d: Devnet, route: Hop[], amountIn: bigint, minProfit
         w(pk(d.assets[p.a].reserve)), w(pk(d.assets[p.b].reserve)),
       ]),
     ],
+  });
+}
+
+/** Admin: hands the keeper role (rebalances, swaps, arbitrage, prices) to another key. */
+export function setKeeperIx(d: Devnet, keeper: PublicKey) {
+  return new TransactionInstruction({
+    programId: STOCKWOVEN,
+    data: Buffer.concat([disc("set_keeper"), keeper.toBuffer()]),
+    keys: [r(admin.publicKey, true), w(pk(d.vault))],
   });
 }
 

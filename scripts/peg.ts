@@ -12,9 +12,9 @@
 //   FAUCET_KEYPAIR=C:/Users/pedro/.stockwoven/faucet-keypair.json npx tsx scripts/peg.ts [--once] [--dry]
 
 import { createAssociatedTokenAccountIdempotentInstruction, createMintToInstruction } from "@solana/spl-token";
-import { Devnet, PoolInfo, PoolState, admin, ata, isqrt, loadKeypair, pk, poolSwapIx, prices, readDevnet, readState, sendV0, stockUsd } from "./sw.ts";
+import { Devnet, PoolInfo, PoolState, admin, ata, envKeypair, isqrt, pk, poolSwapIx, prices, readDevnet, readState, sendV0, stockUsd } from "./sw.ts";
 
-const faucet = loadKeypair(process.env.FAUCET_KEYPAIR ?? "C:/Users/pedro/.stockwoven/faucet-keypair.json");
+const faucet = envKeypair("FAUCET_KEYPAIR", "C:/Users/pedro/.stockwoven/faucet-keypair.json");
 const INTERVAL_SEC = Number(process.env.PEG_INTERVAL_SEC ?? 60);
 /** Pools within this distance of their fair price are left alone. */
 const PEG_TOLERANCE_BPS = Number(process.env.PEG_TOLERANCE_BPS ?? 30);

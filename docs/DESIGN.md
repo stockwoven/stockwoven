@@ -197,3 +197,11 @@ KEYPAIR=… FAUCET_KEYPAIR=… npm run peg   # keeps the mock issuer tokens at 1
 ```
 
 The setup writes every address to `scripts/devnet.json` and `app/src/lib/devnet.json`.
+
+**Always on.** The keeper and the peg bot run on Fly.io as `stockwoven-keeper` (`deploy/keeper/`),
+one machine with no public port. It signs with its own keeper key
+(`4RvVtHGgkCJrUAVupL5wUQJqS5cUn7QmqehfHxoNGRTr`, set with `set_keeper`), stored as the Fly secret
+`KEYPAIR_JSON`; the admin key, which is also the upgrade authority, stays off every server. With
+that key the keeper posts prices, arbitrages, rebalances and harvests, but can't change pool weights
+or the basket's targets: those stay where the admin last set them (`npm run keeper` with the admin
+key moves them again). `fly logs -a stockwoven-keeper` shows each tick.

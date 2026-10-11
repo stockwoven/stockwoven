@@ -12,6 +12,10 @@
 //
 //   KEYPAIR=//wsl.localhost/Ubuntu/home/pedro/.config/solana/id.json npx tsx scripts/keeper.ts [--once]
 //
+// With its own key (KEYPAIR_JSON on Fly, see deploy/keeper/), the keeper can't sign the admin's
+// settings: pool weights and the basket's targets stay where the admin last set them, and steps 2
+// and the target sync in 5 are skipped.
+//
 // The keeper is trusted to choose sizes and prices (it signs with the vault's keeper key), but it
 // cannot mint shares or move funds out of the vault, and every arbitrage is checked on-chain.
 
@@ -76,6 +80,8 @@ const loadState = (): KeeperState =>
 const saveState = (k: KeeperState) => writeFileSync(STATE_FILE, JSON.stringify(k, null, 2) + "\n");
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString().slice(11, 19), ...a);
+/** Whether this key is also the vault admin, which may change pool weights and basket targets. */
+const isAdmin = (d: Devnet) => admin.publicKey.toBase58() === d.admin;
 const fmt = (usd: number) => `$${usd.toFixed(2)}`;
 
 type Edge = { info: PoolInfo; state: PoolState };
@@ -361,7 +367,7 @@ async function postPrices(d: Devnet) {
   const next = basketPrices(d, px);
   const ixs = [setPricesIx(d, next)];
   const weights = basketWeights(d, s.weights);
-  if (weights.some((w, k) => w.targetBps !== basket.assets[k].targetBps || w.maxBps !== basket.assets[k].maxBps)) {
+  if (isAdmin(d) && weights.some((w, k) => w.targetBps !== basket.assets[k].targetBps || w.maxBps !== basket.assets[k].maxBps)) {
     ixs.push(setBasketIx(d, basket.params, weights));
   }
   const sig = await sendV0(ixs, [admin]);
@@ -390,7 +396,7 @@ async function tick() {
   const k = loadState();
   try {
     await arbitrage(d);
-    await updateWeights(d, k);
+    if (isAdmin(d)) await updateWeights(d, k);
     await rebalance(d);
     await harvest(d, k);
     await report(d);
@@ -408,7 +414,9 @@ async function tick() {
 }
 
 async function main() {
-  log("keeper", admin.publicKey.toBase58());
+  const d = readDevnet();
+  log("keeper", admin.publicKey.toBase58(), isAdmin(d) ? "(also admin: sets weights and targets)" : "(keeper only: weights and targets stay as the admin set them)");
+  if (d.keeper !== admin.publicKey.toBase58()) log(`warning: the vault's keeper is ${d.keeper}; this key's keeper steps will fail`);
   await tick();
   if (process.argv.includes("--once")) return;
   setInterval(tick, INTERVAL_SEC * 1000);

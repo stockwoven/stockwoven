@@ -1,0 +1,25 @@
+# The devnet keeper (prices, arbitrage, rebalancing, harvest) and the peg bot, always on.
+# From the repository root:
+#   fly apps create stockwoven-keeper
+#   fly secrets import -a stockwoven-keeper   # KEYPAIR_JSON=<keeper key>, FAUCET_KEYPAIR_JSON=<faucet key>
+#   fly deploy . --config deploy/keeper/fly.toml --dockerfile deploy/keeper/Dockerfile --ha=false --remote-only
+#
+# KEYPAIR_JSON is the vault's keeper key, never the admin or upgrade authority: it can trade the
+# vault's reserves within the program's checks but can't mint shares, move funds out, or change
+# settings. FAUCET_KEYPAIR_JSON only mints the devnet test tokens the peg trades with.
+
+app = "stockwoven-keeper"
+primary_region = "gru"
+
+[env]
+  RPC_URL = "https://api.devnet.solana.com"
+  KEEPER_INTERVAL_SEC = "60"
+  PEG_INTERVAL_SEC = "60"
+
+# No [http_service]: nothing listens, so Fly never stops the machine for being idle.
+[[restart]]
+  policy = "always"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
