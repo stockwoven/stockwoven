@@ -40,7 +40,22 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // The pitch is a PDF opened in the browser's own viewer, which the page CSP above
+      // (object-src 'none') blocks in Chrome. A PDF runs no page scripts, so it only keeps the
+      // framing rule. Later entries override the same header keys.
+      {
+        source: "/pitch",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "Content-Disposition", value: 'inline; filename="Stockwoven Pitch (PT).pdf"' },
+        ],
+      },
+    ];
+  },
+  async rewrites() {
+    return [{ source: "/pitch", destination: "/stockwoven-pitch-pt.pdf" }];
   },
   // A self-contained server (.next/standalone/server.js) for deploying behind nginx; see deploy/README.md.
   output: "standalone",
